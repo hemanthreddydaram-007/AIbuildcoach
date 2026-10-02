@@ -23,55 +23,110 @@ DEFAULT_EXCLUSIONS = [
 ]
 
 
+def _translate_segment(segment: str) -> str:
+    """Converts a single glob segment into regex matching within that segment (no slashes)."""
+    i = 0
+    n = len(segment)
+    res = []
+    while i < n:
+        c = segment[i]
+        if c == "*":
+            res.append("[^/]*")
+            i += 1
+        elif c == "?":
+            res.append("[^/]")
+            i += 1
+        elif c == "[":
+            j = i + 1
+            if j < n and segment[j] in ("!", "^"):
+                j += 1
+            if j < n and segment[j] == "]":
+                j += 1
+            while j < n and segment[j] != "]":
+                j += 1
+            if j >= n:
+                res.append(r"\[")
+                i += 1
+            else:
+                stuff = segment[i + 1 : j]
+                i = j + 1
+                if stuff.startswith(("!", "^")):
+                    stuff = "^" + stuff[1:]
+                res.append(f"[{stuff}]")
+        else:
+            res.append(re.escape(c))
+            i += 1
+    return "".join(res)
+
+
+def _parts_to_regex(parts: List[str]) -> str:
+    """Combines path segments into a path regex handling ** and single *."""
+    if "**" not in parts:
+        return "/".join(_translate_segment(p) for p in parts)
+
+    segments = []
+    for i, p in enumerate(parts):
+        if p == "**":
+            if i == 0 and i == len(parts) - 1:
+                segments.append(".*")
+            elif i == 0:
+                segments.append("(?:.*/)?")
+            elif i == len(parts) - 1:
+                segments.append("/.*")
+            else:
+                segments.append("/(?:.+/)?")
+        else:
+            if i > 0 and parts[i - 1] != "**":
+                segments.append("/")
+            segments.append(_translate_segment(p))
+    return "".join(segments)
+
+
 class GitIgnoreRule:
     def __init__(self, pattern: str, base_dir: Path, is_negation: bool = False, directory_only: bool = False):
         self.raw_pattern = pattern
         self.base_dir = base_dir.resolve()
         self.is_negation = is_negation
         self.directory_only = directory_only
-        self._regex = self._compile_pattern(pattern)
+        self.is_root_anchored = False
+        self._exact_regex, self._child_regex = self._compile_pattern(pattern)
 
-    def _compile_pattern(self, pattern: str) -> re.Pattern:
-        # Normalize pattern
+    def _compile_pattern(self, pattern: str) -> Tuple[re.Pattern, re.Pattern]:
         p = pattern.rstrip("/")
-        # Convert gitignore glob pattern to regex
-        # Handle **/ and /** and *
-        parts = p.split("/")
-        regex_parts = []
-        for i, part in enumerate(parts):
-            if part == "**":
-                regex_parts.append(".*")
-            elif "**" in part:
-                # e.g. a**b
-                subparts = part.split("**")
-                escaped = [fnmatch.translate(sp)[4:-3] for sp in subparts]
-                regex_parts.append(".*".join(escaped))
-            else:
-                tr = fnmatch.translate(part)
-                # fnmatch.translate wraps with (?s:...) and \Z, extract the core regex
-                if tr.startswith("(?s:") and tr.endswith(")\\Z"):
-                    core = tr[4:-3]
-                elif tr.endswith("\\Z"):
-                    core = tr[:-2]
-                else:
-                    core = tr
-                regex_parts.append(core)
-
-        if "/" in p:
-            # Pattern has slash, matches relative to base_dir
-            compiled_regex = "^" + "/".join(regex_parts) + "(?:/.*)?$"
+        if p.startswith("/"):
+            self.is_root_anchored = True
+            clean_pattern = p.lstrip("/")
+        elif "/" in p:
+            self.is_root_anchored = True
+            clean_pattern = p
         else:
-            # Matches in any directory level under base_dir
-            compiled_regex = "(?:^|.*/)" + regex_parts[0] + "(?:/.*)?$"
+            self.is_root_anchored = False
+            clean_pattern = p
 
-        return re.compile(compiled_regex, re.IGNORECASE)
+        parts = clean_pattern.split("/")
+        body = _parts_to_regex(parts)
+
+        if self.is_root_anchored:
+            exact_p = f"^{body}$"
+            child_p = f"^{body}/.*$"
+        else:
+            exact_p = f"(?:^|.*/){body}$"
+            child_p = f"(?:^|.*/){body}/.*$"
+
+        return re.compile(exact_p, re.IGNORECASE), re.compile(child_p, re.IGNORECASE)
 
     def matches(self, rel_path: str, is_dir: bool) -> bool:
-        if self.directory_only and not is_dir:
-            return False
-        # Normalize rel_path with forward slashes
         clean_path = rel_path.replace("\\", "/").strip("/")
-        return bool(self._regex.search(clean_path))
+        if not clean_path:
+            return False
+
+        if self.directory_only:
+            if is_dir:
+                return bool(self._exact_regex.search(clean_path) or self._child_regex.search(clean_path))
+            else:
+                return bool(self._child_regex.search(clean_path))
+        else:
+            return bool(self._exact_regex.search(clean_path) or self._child_regex.search(clean_path))
 
 
 class IgnoreFilter:

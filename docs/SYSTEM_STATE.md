@@ -50,17 +50,18 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Was Tested
-- **Test Suite**: 18 automated tests passing in `tests/`:
-  - `test_db.py`: Schema migrations initialization, incremental migration to v2, project/file CRUD & sync, git state recording.
-  - `test_git_detector.py`: Non-git directory handling, empty repository, untracked files, clean committed repository.
-  - `test_gitignore.py`: Default exclusions, custom `.gitignore` with wildcards, negations, directory-only rules, and directory hierarchies.
-  - `test_scanner.py`: Root marker detection, empty project scan, nested projects, ignored directories, large file detection (>1MB), binary file detection (null bytes), repeated scan idempotence (inserts, updates, deletes), path traversal boundary enforcement, permission error handling, non-UTF-8 byte handling.
+- **Test Suite**: 22 automated tests passing in `tests/`:
+  - `test_db.py`: Schema migrations initialization, incremental migration to v2, project/file CRUD & sync, git state recording, large file-set synchronization (2,500+ records) with batched parameterized deletion.
+  - `test_git_detector.py`: Non-git directory handling, empty repository, untracked files, clean committed repository, git worktree `.git` file pointer support.
+  - `test_gitignore.py`: Default exclusions, custom `.gitignore` with wildcards, negations, directory-only rules, root-anchored leading-slash rules (`/build`, `/secrets`, `/temp/*.log`), and out-of-bounds rejection.
+  - `test_scanner.py`: Root marker detection with directory, file, nested file, nonexistent path inputs, empty project scan, nested projects, ignored directories, large file detection (>1MB), binary file detection (null bytes), repeated scan idempotence (inserts, updates, deletes), path traversal boundary enforcement, permission error handling, non-UTF-8 byte handling, and inaccessible directory traversal (`os.walk` `onerror`).
 - **Live Local Test**: Scanned current repository (22 files indexed into `.buildcoach/state.db` in ~197ms).
 
 ---
 
-## Known Issues
-- None.
+## Known Limitations
+- **Subfolder-level `.gitignore` files**: In M1, `IgnoreFilter` loads the root `.gitignore` and default exclusions. Nested `.gitignore` files in subdirectories are not loaded during traversal (only root-level rules and hierarchical propagation apply).
+- **Repository Scale**: Very large codebases (e.g. 100,000+ files) will benefit from shallow scanning or subfolder scoping. Default exclusions eliminate `node_modules`, `.git`, `venv`, etc. Deletions in SQLite are batched in chunks of 500 to protect against variable limits.
 
 ---
 

@@ -96,20 +96,47 @@ class Database:
         conn = self.get_connection()
         try:
             with conn:
-                current_paths = {f.path for f in files}
-                # Remove files no longer present
-                placeholders = ",".join("?" for _ in current_paths) if current_paths else ""
-                if placeholders:
-                    conn.execute(
-                        f"DELETE FROM files WHERE project_id = ? AND path NOT IN ({placeholders})",
-                        [project_id] + list(current_paths),
-                    )
-                else:
-                    conn.execute("DELETE FROM files WHERE project_id = ?", (project_id,))
+                # 1. Read existing database paths for the project
+                cursor = conn.cursor()
+                cursor.execute("SELECT path FROM files WHERE project_id = ?", (project_id,))
+                existing_paths = {row["path"] for row in cursor.fetchall()}
 
-                # Upsert all scanned files
-                for f in files:
-                    conn.execute(
+                # 2. Build set of current scanned paths
+                current_paths = {f.path for f in files}
+
+                # 3. Calculate paths to delete
+                deleted_paths = existing_paths - current_paths
+
+                # 4. Delete removed paths using safe batched parameterized operations
+                if deleted_paths:
+                    deleted_list = list(deleted_paths)
+                    batch_size = 500
+                    for i in range(0, len(deleted_list), batch_size):
+                        batch = deleted_list[i : i + batch_size]
+                        placeholders = ",".join("?" for _ in batch)
+                        conn.execute(
+                            f"DELETE FROM files WHERE project_id = ? AND path IN ({placeholders})",
+                            [project_id] + batch,
+                        )
+
+                # 5. Upsert all current scanned files
+                if files:
+                    records = [
+                        (
+                            project_id,
+                            f.path,
+                            f.absolute_path,
+                            f.file_size,
+                            f.last_modified,
+                            f.sha256_hash,
+                            f.file_type,
+                            1 if f.is_binary else 0,
+                            1 if f.is_large else 0,
+                            1 if f.is_ignored else 0,
+                        )
+                        for f in files
+                    ]
+                    conn.executemany(
                         """
                         INSERT INTO files (
                             project_id, path, absolute_path, file_size, last_modified,
@@ -125,18 +152,7 @@ class Database:
                             is_large = excluded.is_large,
                             is_ignored = excluded.is_ignored
                         """,
-                        (
-                            project_id,
-                            f.path,
-                            f.absolute_path,
-                            f.file_size,
-                            f.last_modified,
-                            f.sha256_hash,
-                            f.file_type,
-                            1 if f.is_binary else 0,
-                            1 if f.is_large else 0,
-                            1 if f.is_ignored else 0,
-                        ),
+                        records,
                     )
         finally:
             conn.close()

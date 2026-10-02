@@ -60,3 +60,4 @@ class ScanResult(BaseModel):
     git_state: GitState
     scanned_at: str = Field(default_factory=utc_now_iso)
     duration_ms: float = 0.0
+    errors: list[str] = Field(default_factory=list)

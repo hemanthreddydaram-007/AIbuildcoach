@@ -151,3 +151,59 @@ def test_git_state_recording(tmp_path: Path):
     assert latest.head_commit == "abcdef123456"
     assert latest.is_dirty is True
     assert latest.untracked_count == 2
+
+
+def test_large_file_set_synchronization(tmp_path: Path):
+    db_file = tmp_path / "state_large.db"
+    db = Database(db_file)
+
+    project = Project(id="large_proj", name="large_proj", root_path=str(tmp_path))
+    db.upsert_project(project)
+
+    # 1. Programmatically generate 2,500 file models
+    initial_count = 2500
+    files_v1 = [
+        ProjectFile(
+            path=f"src/module_{i}/file_{i}.py",
+            absolute_path=str(tmp_path / f"src/module_{i}/file_{i}.py"),
+            file_size=100 + i,
+            last_modified=1700000000.0,
+            sha256_hash=f"hash_{i}",
+            file_type=".py",
+            is_binary=False,
+            is_large=False,
+            is_ignored=False,
+        )
+        for i in range(initial_count)
+    ]
+
+    # Sync large file set
+    db.sync_files(project.id, files_v1)
+    stored_files = db.get_files_for_project(project.id)
+    assert len(stored_files) == initial_count
+
+    # 2. Modify: keep first 1,000 files, remove 1,500 files, add 200 new files
+    files_v2 = files_v1[:1000] + [
+        ProjectFile(
+            path=f"src/new_module/new_{j}.py",
+            absolute_path=str(tmp_path / f"src/new_module/new_{j}.py"),
+            file_size=50,
+            last_modified=1700001000.0,
+            sha256_hash=f"new_hash_{j}",
+            file_type=".py",
+            is_binary=False,
+            is_large=False,
+            is_ignored=False,
+        )
+        for j in range(200)
+    ]
+
+    # Deleting 1,500 files at once verifies batched deletion does not exceed SQLite variable limits
+    db.sync_files(project.id, files_v2)
+    updated_files = db.get_files_for_project(project.id)
+    assert len(updated_files) == 1200
+    updated_paths = {f.path for f in updated_files}
+    assert "src/module_0/file_0.py" in updated_paths
+    assert "src/module_999/file_999.py" in updated_paths
+    assert "src/module_1500/file_1500.py" not in updated_paths
+    assert "src/new_module/new_0.py" in updated_paths

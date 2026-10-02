@@ -31,20 +31,39 @@ PROJECT_ROOT_MARKERS = [
 def detect_project_root(start_path: Path) -> Path:
     """Traverses upward from start_path to find the project root marker.
     
-    If no marker is found, returns start_path.resolve().
+    If start_path is a file, begins searching from its parent directory.
+    If nonexistent or inaccessible, safely checks parent directories or falls back.
     """
-    current = start_path.resolve()
+    try:
+        resolved = start_path.resolve()
+    except (OSError, ValueError):
+        return start_path
+
+    if resolved.is_file():
+        current = resolved.parent
+    elif not resolved.exists():
+        current = resolved.parent if resolved.suffix or resolved.parent.exists() else resolved
+    else:
+        current = resolved
+
+    fallback = current
+
     while True:
-        for marker in PROJECT_ROOT_MARKERS:
-            candidate = current / marker
-            if candidate.exists():
-                return current
+        try:
+            for marker in PROJECT_ROOT_MARKERS:
+                candidate = current / marker
+                if candidate.exists():
+                    return current
+        except (OSError, PermissionError):
+            pass
+
         parent = current.parent
         if parent == current:
             # Reached filesystem root
             break
         current = parent
-    return start_path.resolve()
+
+    return fallback
 
 
 def is_binary_file(file_path: Path) -> bool:
@@ -128,9 +147,18 @@ class ProjectScanner:
         )
 
         scanned_files: List[ProjectFile] = []
+        scan_errors: List[str] = []
+
+        def _on_walk_error(err: OSError):
+            scan_errors.append(f"Cannot access directory: {err}")
 
         # Deterministic walk: sorted directory traversal
-        for root, dirs, files in os.walk(self.project_root, topdown=True, followlinks=False):
+        for root, dirs, files in os.walk(
+            self.project_root,
+            topdown=True,
+            followlinks=False,
+            onerror=_on_walk_error,
+        ):
             root_path_obj = Path(root)
 
             # Filter out ignored directories in-place to prevent descending into them
@@ -170,4 +198,5 @@ class ProjectScanner:
             files=scanned_files,
             git_state=git_state,
             duration_ms=duration_ms,
+            errors=scan_errors,
         )

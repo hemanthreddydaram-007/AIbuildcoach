@@ -14,7 +14,7 @@ from backend.domain.models import ScanResult
 
 
 def test_detect_project_root(tmp_path: Path):
-    # Case 1: Marker in directory
+    # Case 1: Marker in directory (directory input)
     proj_dir = tmp_path / "project_with_marker"
     proj_dir.mkdir()
     (proj_dir / "pyproject.toml").write_text("[project]\nname='test'\n", encoding="utf-8")
@@ -23,11 +23,30 @@ def test_detect_project_root(tmp_path: Path):
     
     found_root = detect_project_root(nested_dir)
     assert found_root == proj_dir.resolve()
+
+    # Case 2: File input directly at project root
+    root_file = proj_dir / "setup.py"
+    root_file.write_text("# setup", encoding="utf-8")
+    assert detect_project_root(root_file) == proj_dir.resolve()
+
+    # Case 3: Nested file input
+    nested_file = nested_dir / "deep_script.py"
+    nested_file.write_text("print(1)", encoding="utf-8")
+    assert detect_project_root(nested_file) == proj_dir.resolve()
     
-    # Case 2: No marker anywhere
+    # Case 4: No marker anywhere (directory input fallback)
     empty_tmp = tmp_path / "isolated_no_marker"
     empty_tmp.mkdir()
     assert detect_project_root(empty_tmp) == empty_tmp.resolve()
+
+    # Case 5: No marker anywhere (file input fallback)
+    isolated_file = empty_tmp / "random.txt"
+    isolated_file.write_text("data", encoding="utf-8")
+    assert detect_project_root(isolated_file) == empty_tmp.resolve()
+
+    # Case 6: Nonexistent path safe handling
+    nonexistent = empty_tmp / "does_not_exist" / "missing.py"
+    assert detect_project_root(nonexistent) == (empty_tmp / "does_not_exist").resolve()
 
 
 def test_empty_project_scan(tmp_path: Path):
@@ -183,4 +202,42 @@ def test_non_utf8_file_handling(tmp_path: Path):
     assert pfile.file_size == 7
     assert pfile.is_binary is False  # No null bytes
     assert len(pfile.sha256_hash) == 64
+
+
+def test_inaccessible_directory_traversal(tmp_path: Path, monkeypatch):
+    # Setup directories
+    proj_dir = tmp_path / "proj"
+    proj_dir.mkdir()
+    (proj_dir / "accessible.txt").write_text("ok", encoding="utf-8")
+    
+    locked_dir = proj_dir / "locked_folder"
+    locked_dir.mkdir()
+    (locked_dir / "hidden.txt").write_text("hidden", encoding="utf-8")
+    
+    normal_sub = proj_dir / "sub"
+    normal_sub.mkdir()
+    (normal_sub / "nested.txt").write_text("nested", encoding="utf-8")
+
+    # Mock os.scandir so scanning locked_folder raises PermissionError
+    orig_scandir = os.scandir
+
+    def mock_scandir(path="."):
+        if "locked_folder" in str(path):
+            raise PermissionError("Access denied to locked_folder")
+        return orig_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", mock_scandir)
+
+    scanner = ProjectScanner(proj_dir, db_path=proj_dir / ".buildcoach" / "state.db")
+    result = scanner.scan()
+
+    # Accessible files should still be found
+    scanned_paths = [f.path for f in result.files]
+    assert "accessible.txt" in scanned_paths
+    assert "sub/nested.txt" in scanned_paths
+    assert "locked_folder/hidden.txt" not in scanned_paths
+
+    # Error should be safely recorded in result.errors without crashing
+    assert len(result.errors) > 0
+    assert any("locked_folder" in err for err in result.errors)
 
