@@ -66,8 +66,53 @@ def migration_v1(conn: sqlite3.Connection) -> None:
     """)
 
 
+def migration_v2(conn: sqlite3.Connection) -> None:
+    """Version 2: Graph nodes and edges tables."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS graph_nodes (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            node_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            path TEXT,
+            metadata TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_project ON graph_nodes(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_type ON graph_nodes(project_id, node_type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_nodes_path ON graph_nodes(project_id, path)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS graph_edges (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            source_node_id TEXT NOT NULL,
+            target_node_id TEXT NOT NULL,
+            edge_type TEXT NOT NULL,
+            source_file TEXT,
+            line_number INTEGER,
+            raw_statement TEXT,
+            source_type TEXT NOT NULL,
+            confidence TEXT NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (source_node_id) REFERENCES graph_nodes(id) ON DELETE CASCADE,
+            FOREIGN KEY (target_node_id) REFERENCES graph_nodes(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_project ON graph_edges(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_source ON graph_edges(source_node_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_target ON graph_edges(target_node_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(project_id, edge_type)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
+    (2, "Project graph: graph_nodes and graph_edges", migration_v2),
 ]
 
 

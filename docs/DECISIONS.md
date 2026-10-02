@@ -144,3 +144,34 @@ Implement an abstract `AIProvider` gateway with a mandatory pre-flight secret de
 
 ### Date
 2026-10-02
+
+---
+
+## ADR-0006: Deterministic Project Graph & Observation-First Provenance
+
+### Status
+Accepted
+
+### Context
+To ground guidance and Viva defence questions in verifiable codebase structure, the system needs an internal representation of what files exist, how directories are organized, and what modules are imported. Inferring high-level architectural abstractions prematurely (e.g. claiming a file belongs to a particular layer without code evidence) introduces hallucination and brittle assumptions.
+
+### Options Considered
+1. **Dynamic Runtime Inspection / Heavyweight Language Servers**: Run language servers (Pyright, TSServer) or execute code to discover imports. Heavy resource usage, installation requirements, and security risks.
+2. **AI-Inferred Architectural Graph**: Ask an LLM to read files and produce an architectural graph. Non-deterministic, prone to hallucination, and expensive.
+3. **Deterministic Passive Static Graph with Observation-First Provenance**: Construct the graph using passive Python `ast` and JS/TS regex scanners. Every relationship records exact source file, line number, and raw statement. Unsupported languages remain as unlinked `FILE` nodes without invented relationships.
+
+### Chosen Approach
+Adopt the deterministic, passive static Project Graph. Nodes (`PROJECT`, `DIRECTORY`, `FILE`, `MODULE`) and edges (`CONTAINS`, `IMPORTS`, `REFERENCES`) have stable identities derived from relative paths and statements. Extracted relationships are stored in SQLite `.buildcoach/state.db` (`graph_nodes`, `graph_edges`) via migration v2.
+
+### Rationale
+- 100% deterministic and reproducible across repeated scans.
+- Zero untrusted code execution.
+- Provenance guarantees that every edge is supported by verifiable code lines.
+- Safe synchronization: deleted or modified files cleanly update or prune graph edges via set difference.
+
+### Trade-offs & Consequences
+- Complex dynamic imports (e.g., `__import__(var)`) cannot be statically resolved to internal files; they resolve to generic `MODULE` nodes with raw statement provenance.
+- In M2, import extraction is scoped to Python, JavaScript, and TypeScript; other languages are captured as `FILE` nodes with explicit `extraction_supported=False`.
+
+### Date
+2026-10-02

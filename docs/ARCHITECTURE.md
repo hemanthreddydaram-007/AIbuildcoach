@@ -26,6 +26,38 @@ The system is structured as an **Evidence-Backed Human Project Model** composed 
 +-------------------------------------------------------------------------+
 ```
 
+### Layer 1: Project Graph Specification
+
+The Project Graph is the deterministic, evidence-backed foundation answering *"What exists in this project, and how are the parts related?"*. It is constructed passively without executing untrusted project code.
+
+#### 1. Node Types
+- **`PROJECT`**: The top-level root node representing the repository workspace.
+- **`DIRECTORY`**: Directory hierarchies extracted from file paths (`dir:{rel_path}`).
+- **`FILE`**: Individual tracked source, config, asset, or binary files (`file:{rel_path}`).
+- **`MODULE`**: External packages or unmapped library modules referenced by source files (`module:{pkg_name}`).
+
+#### 2. Edge Types
+- **`CONTAINS`**: Hierarchical structural containment (Project contains root files/dirs; directories contain child directories/files).
+- **`IMPORTS`**: Source file dependencies (a file imports another file or external module).
+- **`REFERENCES`**: Explicit citations or references between artifacts.
+
+#### 3. Provenance Model
+Every relationship must originate from deterministic project observations, never AI inference:
+- **`source_file`**: Relative path of the declaring file.
+- **`line_number`**: Exact line number where the relationship appears.
+- **`raw_statement`**: Verbatim source line (e.g. `import { useState } from 'react'`).
+- **`source_type`**: Parsing mechanism (`"ast"` for Python, `"regex"` for JS/TS, `"filesystem"` for directory structure).
+- **`confidence`**: Degree of determinism (`"HIGH"` for verified AST/regex parsing).
+
+#### 4. Synchronization & Storage
+- Stored relationally in SQLite (`.buildcoach/state.db`) using tables `graph_nodes` and `graph_edges` managed by versioned migrations (`migration_v2`).
+- Upon rescanning, file changes and removals are reconciled via set difference: deleted files have their nodes and associated edges automatically pruned, preventing stale graph relationships.
+- Idempotent and deterministic: repeated scans on identical workspaces produce identical node and edge IDs and ordering.
+
+#### 5. Limitations
+- Deterministic relationship extraction in M2 is scoped to Python (`ast.parse`) and JavaScript/TypeScript (regex tokenization).
+- Unsupported file types (`.go`, `.rs`, `.sql`, `.md`, binary assets, etc.) are indexed as `FILE` nodes with `extraction_supported=False`; no edges are guessed.
+
 ---
 
 ## 2. Technology Strategy

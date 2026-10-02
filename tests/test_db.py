@@ -4,15 +4,15 @@ import sqlite3
 from pathlib import Path
 from backend.domain.models import Project, ProjectFile, GitState
 from backend.project_model.db import Database
-from backend.project_model.migrations import apply_migrations, get_current_schema_version
+from backend.project_model.migrations import apply_migrations, get_current_schema_version, MIGRATIONS
 
 
 def test_schema_migrations_initialization(tmp_path: Path):
     db_file = tmp_path / "state.db"
     db = Database(db_file)
     
-    # Version should be 1
-    assert db.get_schema_version() == 1
+    # Version should equal latest migration in MIGRATIONS (version 2 in M2)
+    assert db.get_schema_version() == len(MIGRATIONS)
     
     # Repeated migration application should be a no-op
     conn = db.get_connection()
@@ -25,23 +25,25 @@ def test_schema_migration_step(tmp_path: Path, monkeypatch):
     import backend.project_model.migrations as mig
     db_file = tmp_path / "state_migrate.db"
     db = Database(db_file)
-    assert db.get_schema_version() == 1
+    current_ver = len(mig.MIGRATIONS)
+    assert db.get_schema_version() == current_ver
 
-    # Simulate registering a new migration v2
-    def dummy_v2(conn: sqlite3.Connection):
-        conn.execute("CREATE TABLE test_v2 (id INTEGER PRIMARY KEY, name TEXT)")
+    # Simulate registering a next incremental migration
+    next_ver = current_ver + 1
+    def dummy_next(conn: sqlite3.Connection):
+        conn.execute("CREATE TABLE test_next_step (id INTEGER PRIMARY KEY, name TEXT)")
 
-    custom_migrations = list(mig.MIGRATIONS) + [(2, "Test migration v2", dummy_v2)]
+    custom_migrations = list(mig.MIGRATIONS) + [(next_ver, f"Test migration v{next_ver}", dummy_next)]
     monkeypatch.setattr(mig, "MIGRATIONS", custom_migrations)
 
     conn = db.get_connection()
     applied = mig.apply_migrations(conn)
-    assert applied == [2]
-    assert mig.get_current_schema_version(conn) == 2
+    assert applied == [next_ver]
+    assert mig.get_current_schema_version(conn) == next_ver
 
     # Verify table created
     cursor = conn.cursor()
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test_v2'")
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='test_next_step'")
     assert cursor.fetchone() is not None
     conn.close()
 

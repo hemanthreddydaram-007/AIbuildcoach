@@ -1,10 +1,22 @@
 """Database management and repository operations for AI Build Coach."""
 
 import sqlite3
+import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Set
 
-from backend.domain.models import Project, ProjectFile, GitState, ProjectSummary
+from backend.domain.models import (
+    Project,
+    ProjectFile,
+    GitState,
+    ProjectSummary,
+    ProjectGraph,
+    GraphNode,
+    GraphEdge,
+    ProvenanceRecord,
+    NodeType,
+    EdgeType,
+)
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
 
@@ -250,5 +262,174 @@ class Database:
                     """,
                     (project_id, total_files, duration_ms),
                 )
+        finally:
+            conn.close()
+
+    def save_graph(self, graph: ProjectGraph) -> None:
+        """Saves or synchronizes project graph nodes and edges into the database."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                # 1. Synchronize nodes
+                cursor.execute("SELECT id FROM graph_nodes WHERE project_id = ?", (graph.project_id,))
+                existing_node_ids = {row["id"] for row in cursor.fetchall()}
+                current_node_ids = set(graph.nodes.keys())
+                deleted_node_ids = existing_node_ids - current_node_ids
+
+                # 2. Synchronize edges
+                cursor.execute("SELECT id FROM graph_edges WHERE project_id = ?", (graph.project_id,))
+                existing_edge_ids = {row["id"] for row in cursor.fetchall()}
+                current_edge_ids = {e.id for e in graph.edges}
+                deleted_edge_ids = existing_edge_ids - current_edge_ids
+
+                # Delete removed edges first to respect foreign keys
+                if deleted_edge_ids:
+                    del_edges = list(deleted_edge_ids)
+                    batch_size = 500
+                    for i in range(0, len(del_edges), batch_size):
+                        batch = del_edges[i : i + batch_size]
+                        placeholders = ",".join("?" for _ in batch)
+                        conn.execute(
+                            f"DELETE FROM graph_edges WHERE project_id = ? AND id IN ({placeholders})",
+                            [graph.project_id] + batch,
+                        )
+
+                # Delete removed nodes
+                if deleted_node_ids:
+                    del_nodes = list(deleted_node_ids)
+                    batch_size = 500
+                    for i in range(0, len(del_nodes), batch_size):
+                        batch = del_nodes[i : i + batch_size]
+                        placeholders = ",".join("?" for _ in batch)
+                        conn.execute(
+                            f"DELETE FROM graph_nodes WHERE project_id = ? AND id IN ({placeholders})",
+                            [graph.project_id] + batch,
+                        )
+
+                # Upsert current nodes
+                if graph.nodes:
+                    node_records = [
+                        (
+                            n.id,
+                            n.project_id,
+                            n.node_type,
+                            n.name,
+                            n.path,
+                            json.dumps(n.metadata, sort_keys=True),
+                            n.created_at,
+                        )
+                        for n in sorted(graph.nodes.values(), key=lambda x: x.id)
+                    ]
+                    conn.executemany(
+                        """
+                        INSERT INTO graph_nodes (id, project_id, node_type, name, path, metadata, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            node_type = excluded.node_type,
+                            name = excluded.name,
+                            path = excluded.path,
+                            metadata = excluded.metadata
+                        """,
+                        node_records,
+                    )
+
+                # Upsert current edges
+                if graph.edges:
+                    edge_records = [
+                        (
+                            e.id,
+                            e.project_id,
+                            e.source_node_id,
+                            e.target_node_id,
+                            e.edge_type,
+                            e.evidence.source_file,
+                            e.evidence.line_number,
+                            e.evidence.raw_statement,
+                            e.evidence.source_type,
+                            e.evidence.confidence,
+                            e.status,
+                            e.created_at,
+                        )
+                        for e in sorted(graph.edges, key=lambda x: x.id)
+                    ]
+                    conn.executemany(
+                        """
+                        INSERT INTO graph_edges (
+                            id, project_id, source_node_id, target_node_id, edge_type,
+                            source_file, line_number, raw_statement, source_type, confidence, status, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            source_file = excluded.source_file,
+                            line_number = excluded.line_number,
+                            raw_statement = excluded.raw_statement,
+                            source_type = excluded.source_type,
+                            confidence = excluded.confidence,
+                            status = excluded.status
+                        """,
+                        edge_records,
+                    )
+        finally:
+            conn.close()
+
+    def get_graph(self, project_id: str) -> Optional[ProjectGraph]:
+        """Loads the project graph from database."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM projects WHERE id = ?", (project_id,))
+            if not cursor.fetchone():
+                return None
+
+            cursor.execute(
+                "SELECT id, project_id, node_type, name, path, metadata, created_at FROM graph_nodes WHERE project_id = ? ORDER BY id ASC",
+                (project_id,),
+            )
+            node_rows = cursor.fetchall()
+            nodes: Dict[str, GraphNode] = {}
+            for r in node_rows:
+                meta = json.loads(r["metadata"]) if r["metadata"] else {}
+                nodes[r["id"]] = GraphNode(
+                    id=r["id"],
+                    project_id=r["project_id"],
+                    node_type=r["node_type"],
+                    name=r["name"],
+                    path=r["path"],
+                    metadata=meta,
+                    created_at=r["created_at"],
+                )
+
+            cursor.execute(
+                """
+                SELECT id, project_id, source_node_id, target_node_id, edge_type,
+                       source_file, line_number, raw_statement, source_type, confidence, status, created_at
+                FROM graph_edges WHERE project_id = ? ORDER BY id ASC
+                """,
+                (project_id,),
+            )
+            edge_rows = cursor.fetchall()
+            edges: List[GraphEdge] = []
+            for r in edge_rows:
+                evidence = ProvenanceRecord(
+                    source_file=r["source_file"] or "",
+                    line_number=r["line_number"],
+                    raw_statement=r["raw_statement"],
+                    source_type=r["source_type"] or "unknown",
+                    confidence=r["confidence"] or "HIGH",
+                )
+                edges.append(
+                    GraphEdge(
+                        id=r["id"],
+                        project_id=r["project_id"],
+                        source_node_id=r["source_node_id"],
+                        target_node_id=r["target_node_id"],
+                        edge_type=r["edge_type"],
+                        evidence=evidence,
+                        status=r["status"] or "CONFIRMED",
+                        created_at=r["created_at"],
+                    )
+                )
+
+            return ProjectGraph(project_id=project_id, nodes=nodes, edges=edges)
         finally:
             conn.close()

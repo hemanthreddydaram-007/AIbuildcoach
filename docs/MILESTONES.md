@@ -64,7 +64,7 @@ Every milestone must strictly execute the following engineering cycle before pro
   - AST / static dependency extraction for Python and JavaScript/TypeScript.
   - Relationship modeling with strict provenance (`file:A` imports `file:B`).
   - Graph persistence in SQLite.
-- **Gate**: Developer can inspect the graph and answer "What exists in this project?" purely from static evidence.
+- **Gate**: Developer can inspect the graph and answer "What exists in this project?" purely from static evidence. [Status: COMPLETED - 36 tests passing]
 
 #### Milestone 3 — Git + Development Context
 - **Goal**: Capture working-tree changes, staged/unstaged diffs, and classify file mutations.

@@ -10,6 +10,7 @@ from backend.domain.models import Project, ProjectFile, GitState, ScanResult
 from backend.project_model.gitignore import IgnoreFilter, DEFAULT_EXCLUSIONS
 from backend.project_model.git_detector import detect_git_state
 from backend.project_model.db import Database
+from backend.project_model.graph_builder import ProjectGraphBuilder
 
 MAX_FILE_SIZE_FOR_FULL_SCAN = 1024 * 1024  # 1 MB threshold for large file tagging
 SAMPLE_CHUNK_SIZE = 8192  # 8 KB for binary detection
@@ -190,6 +191,15 @@ class ProjectScanner:
         self.db.sync_files(project.id, scanned_files)
         self.db.record_git_state(project.id, git_state)
 
+        # Build and synchronize Project Graph
+        graph_builder = ProjectGraphBuilder(
+            project_root=self.project_root,
+            project=project,
+            files=scanned_files,
+            db=self.db,
+        )
+        project_graph = graph_builder.build()
+
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         self.db.record_scan_run(project.id, len(scanned_files), duration_ms)
 
@@ -197,6 +207,7 @@ class ProjectScanner:
             project=project,
             files=scanned_files,
             git_state=git_state,
+            graph=project_graph,
             duration_ms=duration_ms,
             errors=scan_errors,
         )
