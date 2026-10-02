@@ -48,6 +48,16 @@ JS_TS_IMPORT_PATTERNS = [
     re.compile(r"""import\s*\(\s*['"]([^'"]+)['"]\s*\)"""),
 ]
 
+FROM_MODULE_PATTERN = re.compile(r"""\bfrom\s+['"]([^'"]+)['"]""")
+MULTILINE_CALL_PATTERN = re.compile(r"""\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+
+
+def _strip_comments_for_matching(text: str) -> str:
+    """Strips comments for regex matching without mutating original source."""
+    t = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    t = re.sub(r"//.*$", " ", t, flags=re.MULTILINE)
+    return t
+
 LANGUAGE_EXTENSIONS = {
     ".py": "python",
     ".js": "javascript",
@@ -112,7 +122,7 @@ def extract_python_imports(file_path: Path, rel_path: str) -> ExtractionResult:
 
 
 def extract_js_ts_imports(file_path: Path, rel_path: str, language: str) -> ExtractionResult:
-    """Extracts imports deterministically from JS/TS source files line-by-line."""
+    """Extracts imports deterministically from JS/TS source files with safe statement accumulation."""
     try:
         source = file_path.read_text(encoding="utf-8", errors="replace")
     except (OSError, UnicodeDecodeError) as e:
@@ -120,13 +130,20 @@ def extract_js_ts_imports(file_path: Path, rel_path: str, language: str) -> Extr
 
     lines = source.splitlines()
     imports: List[ExtractedImport] = []
+    idx = 0
+    n = len(lines)
 
-    for idx, line in enumerate(lines, start=1):
+    while idx < n:
+        line = lines[idx]
         clean_line = line.strip()
-        # Skip pure comments
+
+        # Skip empty lines or pure comment lines
         if not clean_line or clean_line.startswith("//") or clean_line.startswith("/*") or clean_line.startswith("*"):
+            idx += 1
             continue
 
+        # 1. Check for single-line imports first
+        matched_single = False
         for pattern in JS_TS_IMPORT_PATTERNS:
             match = pattern.search(clean_line)
             if match:
@@ -137,12 +154,135 @@ def extract_js_ts_imports(file_path: Path, rel_path: str, language: str) -> Extr
                             imported_name=module_name,
                             source_module=None,
                             level=1 if module_name.startswith(".") else 0,
-                            line_number=idx,
+                            line_number=idx + 1,
                             raw_statement=clean_line,
                             source_type="regex",
                         )
                     )
-                break
+                    matched_single = True
+                    break
+
+        if matched_single:
+            idx += 1
+            continue
+
+        # 2. Check for multiline ES module import / re-export statement
+        is_import_start = clean_line == "import" or clean_line.startswith(
+            ("import ", "import\t", "import{", "import type")
+        )
+        is_export_start = bool(re.match(r"^export\s+(?:type\s+)?(?:\{|\*)", clean_line))
+
+        if is_import_start or is_export_start:
+            accumulated = [line]
+            start_line = idx + 1
+            consumed_to = idx
+            found = False
+
+            for j in range(idx + 1, min(idx + 50, n)):
+                sub_line = lines[j]
+                accumulated.append(sub_line)
+                consumed_to = j
+
+                combined = "\n".join(accumulated)
+                combined_clean = _strip_comments_for_matching(combined)
+
+                # Check if we found 'from ...'
+                from_match = FROM_MODULE_PATTERN.search(combined_clean)
+                if from_match:
+                    mod = from_match.group(1).strip()
+                    if mod:
+                        imports.append(
+                            ExtractedImport(
+                                imported_name=mod,
+                                source_module=None,
+                                level=1 if mod.startswith(".") else 0,
+                                line_number=start_line,
+                                raw_statement="\n".join(accumulated).strip(),
+                                source_type="regex",
+                            )
+                        )
+                    found = True
+                    idx = consumed_to
+                    break
+
+                # Support multiline bare import: import\n  "style.css";
+                bare_match = re.search(r"""(?:^|\s+)import\s+['"]([^'"]+)['"]""", combined_clean)
+                if bare_match and is_import_start:
+                    mod = bare_match.group(1).strip()
+                    if mod:
+                        imports.append(
+                            ExtractedImport(
+                                imported_name=mod,
+                                source_module=None,
+                                level=1 if mod.startswith(".") else 0,
+                                line_number=start_line,
+                                raw_statement="\n".join(accumulated).strip(),
+                                source_type="regex",
+                            )
+                        )
+                    found = True
+                    idx = consumed_to
+                    break
+
+                # Abort boundaries:
+                # 1. Semicolon reached without 'from' in combined text (e.g. export { a, b };)
+                if ";" in combined_clean and not ("from" in combined_clean):
+                    break
+
+                # 2. Another top-level declaration keyword encountered before finding 'from'
+                sub_uncommented = _strip_comments_for_matching(sub_line).strip()
+                if sub_uncommented.startswith((
+                    "import ", "import\t", "import{", "export ", "export\t",
+                    "class ", "function ", "const ", "let ", "var "
+                )):
+                    break
+
+            if found:
+                idx += 1
+                continue
+
+        # 3. Multiline require(...) or dynamic import(...)
+        if re.search(r"\b(?:require|import)\s*\(", clean_line):
+            accumulated = [line]
+            start_line = idx + 1
+            consumed_to = idx
+            found = False
+
+            for j in range(idx + 1, min(idx + 20, n)):
+                sub_line = lines[j]
+                accumulated.append(sub_line)
+                consumed_to = j
+
+                combined = "\n".join(accumulated)
+                combined_clean = _strip_comments_for_matching(combined)
+
+                call_match = MULTILINE_CALL_PATTERN.search(combined_clean)
+                if call_match:
+                    mod = call_match.group(1).strip()
+                    if mod:
+                        imports.append(
+                            ExtractedImport(
+                                imported_name=mod,
+                                source_module=None,
+                                level=1 if mod.startswith(".") else 0,
+                                line_number=start_line,
+                                raw_statement="\n".join(accumulated).strip(),
+                                source_type="regex",
+                            )
+                        )
+                    found = True
+                    idx = consumed_to
+                    break
+
+                # Abort if statement closed or terminated
+                if ";" in combined_clean or ")" in combined_clean:
+                    break
+
+            if found:
+                idx += 1
+                continue
+
+        idx += 1
 
     imports.sort(key=lambda x: (x.line_number or 0, x.imported_name))
     return ExtractionResult(rel_path, language=language, is_supported=True, imports=imports)

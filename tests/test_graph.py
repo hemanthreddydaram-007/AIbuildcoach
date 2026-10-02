@@ -368,3 +368,118 @@ def test_mixed_language_project_behavior(tmp_path: Path):
 
     app_imports = {e.target_node_id for e in graph.get_imports_for("frontend/src/App.tsx")}
     assert "module:react" in app_imports
+
+
+def test_multiline_js_ts_import_extraction(tmp_path: Path):
+    """Test 21: Multiline JavaScript/TypeScript imports and exports with safe statement accumulation."""
+    models_file = tmp_path / "models.ts"
+    models_file.write_text("export interface User {}\nexport interface Admin {}\n", encoding="utf-8")
+
+    users_file = tmp_path / "users.ts"
+    users_file.write_text("export interface CurrentUser {}\nexport interface AdminUser {}\n", encoding="utf-8")
+
+    (tmp_path / "dynamic.ts").write_text("export const dyn = 1;\n", encoding="utf-8")
+    (tmp_path / "lazy-comp.ts").write_text("export const lazy = 2;\n", encoding="utf-8")
+    (tmp_path / "config.ts").write_text("export const cfg = 3;\n", encoding="utf-8")
+    (tmp_path / "recovered.ts").write_text("export const rec = 4;\n", encoding="utf-8")
+
+    app_ts = tmp_path / "app.ts"
+    app_ts.write_text(
+        '// Line 1: Header\n'
+        'import {\n'
+        '    User,\n'
+        '    Admin\n'
+        '} from "./models";\n'
+        '\n'
+        'import React, {\n'
+        '    useState,\n'
+        '    useEffect\n'
+        '} from "react";\n'
+        '\n'
+        'export {\n'
+        '    User,\n'
+        '    Admin\n'
+        '} from "./models";\n'
+        '\n'
+        'import {\n'
+        '    // Current user\n'
+        '    CurrentUser,\n'
+        '    /* Admins */\n'
+        '    AdminUser\n'
+        '} from "./users";\n'
+        '\n'
+        'import express from "express";\n'
+        'const cors = require("cors");\n'
+        '\n'
+        'const dyn = import("./dynamic");\n'
+        '\n'
+        'const lazy = import(\n'
+        '    "./lazy-comp"\n'
+        ');\n'
+        '\n'
+        'const config = require(\n'
+        '    "./config"\n'
+        ');\n'
+        '\n'
+        '// Internal export: must NOT be detected as import\n'
+        'export {\n'
+        '    LocalState\n'
+        '};\n'
+        '\n'
+        '// Malformed / unclosed multiline statement recovery\n'
+        'import {\n'
+        '    brokenToken\n'
+        'const recoveryBoundary = 42;\n'
+        '\n'
+        'import { safePostRecovery } from "./recovered";\n',
+        encoding="utf-8",
+    )
+
+    scanner = ProjectScanner(tmp_path, db_path=tmp_path / ".buildcoach" / "state.db")
+    result = scanner.scan()
+    graph = result.graph
+    assert graph is not None
+
+    imports = graph.get_imports_for("app.ts")
+    target_ids = {e.target_node_id for e in imports}
+
+    # Relative imports resolve to file nodes or unresolved module nodes
+    assert "file:models.ts" in target_ids
+    assert "file:users.ts" in target_ids
+    assert "module:react" in target_ids
+    assert "module:express" in target_ids
+    assert "module:cors" in target_ids
+    assert "file:dynamic.ts" in target_ids
+    assert "file:lazy-comp.ts" in target_ids
+    assert "file:config.ts" in target_ids
+    assert "file:recovered.ts" in target_ids
+
+    # Verify provenance for multiline named import (starts at line 2)
+    models_import = next(e for e in imports if e.target_node_id == "file:models.ts" and e.evidence.line_number == 2)
+    assert models_import.evidence.source_file == "app.ts"
+    assert models_import.evidence.line_number == 2
+    assert 'from "./models"' in models_import.evidence.raw_statement
+    assert "User" in models_import.evidence.raw_statement
+    assert models_import.evidence.source_type == "regex"
+    assert models_import.evidence.confidence == "HIGH"
+
+    # Verify provenance for multiline default + named import (starts at line 7)
+    react_import = next(e for e in imports if e.target_node_id == "module:react")
+    assert react_import.evidence.source_file == "app.ts"
+    assert react_import.evidence.line_number == 7
+    assert "React" in react_import.evidence.raw_statement
+    assert 'from "react"' in react_import.evidence.raw_statement
+
+    # Verify provenance for multiline with comments (starts at line 17)
+    users_import = next(e for e in imports if e.target_node_id == "file:users.ts")
+    assert users_import.evidence.source_file == "app.ts"
+    assert users_import.evidence.line_number == 17
+    assert 'from "./users"' in users_import.evidence.raw_statement
+
+    # Verify internal export (LocalState) did not produce an import edge
+    assert not any("LocalState" in (e.evidence.raw_statement or "") for e in imports)
+
+    # Verify recovery: safePostRecovery was successfully captured despite broken previous statement
+    recovered_import = next(e for e in imports if "recovered" in e.target_node_id)
+    assert recovered_import.evidence.line_number > 40
+    assert "safePostRecovery" in recovered_import.evidence.raw_statement
