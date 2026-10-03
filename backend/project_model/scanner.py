@@ -11,6 +11,7 @@ from backend.project_model.gitignore import IgnoreFilter, DEFAULT_EXCLUSIONS
 from backend.project_model.git_detector import detect_git_state
 from backend.project_model.db import Database
 from backend.project_model.graph_builder import ProjectGraphBuilder
+from backend.project_model.context_detector import ContextDetector
 
 MAX_FILE_SIZE_FOR_FULL_SCAN = 1024 * 1024  # 1 MB threshold for large file tagging
 SAMPLE_CHUNK_SIZE = 8192  # 8 KB for binary detection
@@ -200,6 +201,11 @@ class ProjectScanner:
         )
         project_graph = graph_builder.build()
 
+        # Collect and persist development context (M3: ChangeSet and Evidence)
+        context_detector = ContextDetector(self.project_root, project.id)
+        change_set = context_detector.collect()
+        self.db.save_change_set(change_set)
+
         duration_ms = (time.perf_counter() - start_time) * 1000.0
         self.db.record_scan_run(project.id, len(scanned_files), duration_ms)
 
@@ -208,6 +214,7 @@ class ProjectScanner:
             files=scanned_files,
             git_state=git_state,
             graph=project_graph,
+            change_set=change_set,
             duration_ms=duration_ms,
             errors=scan_errors,
         )

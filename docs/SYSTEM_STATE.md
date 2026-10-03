@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 2: Project Brain Foundation (Project Graph)**
+**Milestone 3: Development Context (Change Evidence Layer)**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -16,12 +16,14 @@ This document serves as the project's operational memory across development sess
 - Baseline project architecture and contracts (`docs/`).
 - Python package setup (`pyproject.toml`) with Pydantic and pytest.
 - Pydantic domain models:
-  - `Project`, `ProjectFile`, `GitState`, `SchemaVersion`, `ProjectSummary`, `ScanResult`.
-  - `ProjectGraph`, `GraphNode`, `GraphEdge`, `ProvenanceRecord`, `NodeType`, `EdgeType`.
+  - M1: `Project`, `ProjectFile`, `GitState`, `SchemaVersion`, `ProjectSummary`, `ScanResult`.
+  - M2: `ProjectGraph`, `GraphNode`, `GraphEdge`, `ProvenanceRecord`, `NodeType`, `EdgeType`.
+  - M3: `ChangeSet`, `FileChange`, `DiffHunk`, `EvidenceRecord`, `ChangeType`.
 - Deterministic SQLite database (`.buildcoach/state.db`):
   - Explicit schema versioning and migration framework (`schema_migrations`, `projects`, `files`, `git_states`, `scan_runs`).
   - Migration v2: `graph_nodes` and `graph_edges` tables with cascading foreign keys and indexes.
-  - Upserting projects, syncing file changes, recording Git states, tracking scan runs, and saving/loading project graphs.
+  - Migration v3: `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` tables with cascading foreign keys and indexes.
+  - CRUD operations for projects, file syncing, Git states, scan runs, project graphs, and development context change sets.
 - Safe, read-only Git state detector (`detect_git_state`):
   - Inspects branch name, HEAD commit hash, dirty flag, untracked/modified/staged file counts.
   - Safe fallback for non-git directories, empty repositories, and Git worktree file pointers.
@@ -36,22 +38,25 @@ This document serves as the project's operational memory across development sess
   - 8 KB null-byte inspection for binary file detection.
   - 1 MB file size threshold tagging for large files (`is_large`).
   - Alphabetically sorted file walking for 100% deterministic output.
-  - Graceful handling of permission-denied files, unreadable directories (`os.walk` `onerror`), and non-UTF-8 byte sequences.
+  - Automatic integration with Project Graph generation and Development Context collection.
 - Project Graph Builder & Passive Relationship Extractor (`ProjectGraphBuilder`, `relationship_extractor`):
   - Node entities: `PROJECT`, `DIRECTORY`, `FILE`, `MODULE`.
   - Edge entities: `CONTAINS`, `IMPORTS`, `REFERENCES`.
-  - Deterministic import extraction for Python (`ast.parse`) and JavaScript/TypeScript (regex tokenization).
-  - Relative import resolution to internal project files (`file:{path}`).
-  - External module resolution (`module:{pkg}`).
+  - Deterministic import extraction for Python (`ast.parse`) and JavaScript/TypeScript (safe statement accumulation for single-line and multiline imports).
+  - Relative import resolution to internal project files (`file:{path}`) and external module resolution (`module:{pkg}`).
   - Strict provenance recording (`source_file`, `line_number`, `raw_statement`, `source_type`, `confidence`).
-  - Non-crashing error resilience for malformed files (syntax errors recorded in node metadata).
   - Graph synchronization: additions, modifications, and deletions cleanly reconcile without stale edges.
-  - 100% idempotent: repeated scans on identical state produce identical nodes, edges, IDs, and ordering.
+- Development Context & Change Evidence Engine (`ContextDetector`, `diff_parser`):
+  - 5-layer context priority: 1. Working tree, 2. Git status, 3. Unstaged diff, 4. Staged diff, 5. Recent commit info.
+  - Deterministic unified diff parsing for added, modified, deleted, and renamed files.
+  - Multiline hunk tracking with old/new line ranges and content preservation.
+  - Binary file modification detection without reading raw binary payloads into memory.
+  - Strictly factual EvidenceRecords (zero inference; zero claims of user intent).
+  - 100% deterministic SHA-256 IDs for ChangeSets, FileChanges, DiffHunks, and EvidenceRecords.
 
 ---
 
 ## What Does Not Work (Intentional Scope Boundaries)
-- Diff parsing and working-tree change classification (scheduled for Milestone 3).
 - Context compression and secret redaction engine (scheduled for Milestone 4).
 - AI Gateway provider integrations (scheduled for Milestone 5).
 - User-facing workflows (scheduled for Milestones 6–8).
@@ -60,30 +65,27 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Was Tested
-- **Test Suite**: 36 automated tests passing in `tests/`:
-  - `test_db.py`: Schema migrations v1 and v2 initialization, incremental migration to v3, project/file CRUD & sync, git state recording, large file-set synchronization (2,500+ records) with batched parameterized deletion.
-  - `test_git_detector.py`: Non-git directory handling, empty repository, untracked files, clean committed repository, git worktree `.git` file pointer support.
-  - `test_gitignore.py`: Default exclusions, custom `.gitignore` with wildcards, negations, directory-only rules, root-anchored leading-slash rules, and out-of-bounds rejection.
-  - `test_scanner.py`: Root marker detection with directory, file, nested file, nonexistent path inputs, empty project scan, nested projects, ignored directories, large file detection (>1MB), binary file detection, repeated scan idempotence, path traversal boundary enforcement, permission error handling, non-UTF-8 byte handling, and inaccessible directory traversal.
-  - `test_graph.py`: Project, Directory, and File node creation, CONTAINS relationships, Python import extraction, JavaScript import extraction, TypeScript import extraction, unsupported language behavior (Go, SQL, etc.), relationship provenance, stable node identities, stable edge identities, repeated graph build idempotence, added file synchronization, deleted file synchronization, changed relationship synchronization, malformed source code handling, binary file handling, path boundary safety, empty project behavior, and mixed-language projects.
-- **Live Local Test**: Scanned current repository (23 files indexed into `.buildcoach/state.db` and full project graph generated in ~215ms).
+- **Test Suite**: 55 automated tests passing in `tests/`:
+  - `test_context.py` (18 tests): Clean working tree, unstaged modified files, untracked/staged added files, deleted files, renamed files, multiple changed files, unstaged diff details, staged diff details, multiple non-contiguous hunks, binary files, empty diff, missing git repo, git command failure, deterministic ChangeSet IDs, deterministic Evidence IDs, repeated context collection & persistence, synchronization after file reverted, scanner integration with M3 change set.
+  - `test_db.py` (5 tests): Schema migrations v1, v2, v3, project/file CRUD & sync, git state recording, large file-set synchronization (2,500+ records) with batched parameterized deletion.
+  - `test_git_detector.py` (3 tests): Non-git directory handling, empty repository, untracked files, clean committed repository, git worktree `.git` file pointer support.
+  - `test_gitignore.py` (3 tests): Default exclusions, custom `.gitignore` with wildcards, negations, directory-only rules, root-anchored leading-slash rules, and out-of-bounds rejection.
+  - `test_graph.py` (14 tests): Project, Directory, File, Module nodes, CONTAINS relationships, Python AST imports, JS/TS single-line imports, TS type imports, multiline JS/TS import extraction with safe statement accumulation, unsupported languages, provenance, stable identities, repeated build idempotence, synchronization lifecycle, malformed files, binary files, path security, empty projects, mixed-language projects.
+  - `test_scanner.py` (12 tests): Root marker detection, empty project scan, nested projects, ignored directories, large file detection (>1MB), binary file detection, repeated scan idempotence, path traversal boundary enforcement, permission error handling, non-UTF-8 byte handling, inaccessible directory traversal.
+- **Live Local Test**: 55 passed in 22.66s.
 
 ---
 
 ## Known Limitations
-- **Language Relationship Extraction Scope**: In M2, import extraction is implemented for Python, JavaScript, and TypeScript without full compiler infrastructure. Other languages (`.go`, `.rs`, `.sql`, `.md`, etc.) are captured as `FILE` nodes with `extraction_supported=False` and zero hallucinated edges.
-- **Subfolder-level `.gitignore` files**: In M1/M2, `IgnoreFilter` loads the root `.gitignore` and default exclusions. Nested `.gitignore` files in subdirectories are not loaded during traversal (only root-level rules and hierarchical propagation apply).
+- **Language Relationship Extraction Scope**: Import extraction covers Python, JavaScript, and TypeScript without full compiler infrastructure. Other languages (`.go`, `.rs`, `.sql`, `.md`, etc.) are captured as `FILE` nodes with `extraction_supported=False` and zero hallucinated edges.
+- **Dynamic Imports with Variable Expressions**: Statically unknown expressions (e.g. `import(variable)`) are intentionally omitted from static relationship extraction.
+- **Subfolder-level `.gitignore` files**: `IgnoreFilter` loads root `.gitignore` and default exclusions.
 - **Repository Scale**: Very large codebases (e.g. 100,000+ files) will benefit from shallow scanning or subfolder scoping. Default exclusions eliminate `node_modules`, `.git`, `venv`, etc. Deletions in SQLite are batched in chunks of 500 to protect against variable limits.
 
 ---
 
-## Known Risks
-1. **Repository Scale**: Very large codebases (e.g. 100,000+ files) will require shallow scanning or subfolder scoping. Default exclusions currently eliminate `node_modules`, `.git`, `venv`, etc.
-2. **Symlink Loops**: Uncontrolled symlinks outside project boundary are skipped via `Path.resolve().relative_to(root)`.
-
----
-
 ## Next Milestone
-**Milestone 3: Git + Development Context**
-- Capture working-tree changes, staged/unstaged diffs, and classify file mutations.
-- Extract evidence records for Git observations with freshness and confidence metrics.
+**Milestone 4: Context Engine (Pipeline, Secret Redaction, Compression)**
+- Implement deterministic context normalization and boilerplate filtering.
+- Deterministic secret detection and redaction engine.
+- Context compression budgeting (targeting 3,000–6,000 tokens).

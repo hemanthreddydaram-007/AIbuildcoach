@@ -1,7 +1,7 @@
 """Domain models for AI Build Coach Foundation."""
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pydantic import BaseModel, Field
 
 
@@ -147,11 +147,68 @@ class ProjectSummary(BaseModel):
     last_scanned: str = Field(default_factory=utc_now_iso)
 
 
+class ChangeType(str):
+    ADDED = "ADDED"
+    MODIFIED = "MODIFIED"
+    DELETED = "DELETED"
+    RENAMED = "RENAMED"
+
+
+class DiffHunk(BaseModel):
+    id: str
+    file_change_id: str
+    old_start: int
+    old_lines: int
+    new_start: int
+    new_lines: int
+    header: Optional[str] = None
+    content: str
+
+
+class FileChange(BaseModel):
+    id: str
+    change_set_id: str
+    old_path: Optional[str] = None
+    new_path: str
+    change_type: str  # ADDED, MODIFIED, DELETED, RENAMED
+    is_staged: bool = False
+    is_untracked: bool = False
+    old_line_count: Optional[int] = None
+    new_line_count: Optional[int] = None
+    line_ranges: List[Tuple[int, int]] = Field(default_factory=list)
+    hunks: List[DiffHunk] = Field(default_factory=list)
+    is_binary: bool = False
+
+
+class EvidenceRecord(BaseModel):
+    id: str
+    project_id: str
+    change_set_id: Optional[str] = None
+    evidence_type: str  # GIT_STATUS, GIT_DIFF, RECENT_COMMIT, WORKING_TREE
+    source: str  # e.g. git status --porcelain, git diff, git diff --cached, git log -1
+    file_path: Optional[str] = None
+    observation: str
+    raw_data: Optional[str] = None
+    confidence: str = "HIGH"
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
+class ChangeSet(BaseModel):
+    id: str
+    project_id: str
+    git_state: GitState
+    file_changes: List[FileChange] = Field(default_factory=list)
+    evidence: List[EvidenceRecord] = Field(default_factory=list)
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    created_at: str = Field(default_factory=utc_now_iso)
+
+
 class ScanResult(BaseModel):
     project: Project
-    files: list[ProjectFile]
+    files: List[ProjectFile]
     git_state: GitState
     graph: Optional[ProjectGraph] = None
+    change_set: Optional[ChangeSet] = None
     scanned_at: str = Field(default_factory=utc_now_iso)
     duration_ms: float = 0.0
-    errors: list[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)

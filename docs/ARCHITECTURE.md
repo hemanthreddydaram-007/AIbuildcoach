@@ -58,6 +58,27 @@ Every relationship must originate from deterministic project observations, never
 - Deterministic relationship extraction in M2 is scoped to Python (`ast.parse`) and JavaScript/TypeScript (regex tokenization).
 - Unsupported file types (`.go`, `.rs`, `.sql`, `.md`, binary assets, etc.) are indexed as `FILE` nodes with `extraction_supported=False`; no edges are guessed.
 
+### Layer 2: Development Context (Change Evidence Layer)
+
+The Development Context layer is the deterministic, read-only inspection engine answering *"What is changing in the project right now?"*. It operates with uncommitted changes without requiring commits.
+
+#### 1. Context Priority Hierarchy
+1. **Working-Tree State**: Direct inspection of untracked files and working-tree modifications.
+2. **Git Status (`git status --porcelain=v1 -uall`)**: Deterministic porcelain status codes for staged, unstaged, untracked, deleted, and renamed files.
+3. **Unstaged Diff (`git diff --no-color -p -U3`)**: File-by-file hunks and line ranges between index and worktree.
+4. **Staged Diff (`git diff --cached --no-color -p -U3`)**: File-by-file hunks and line ranges between HEAD and index.
+5. **Recent Commit Information (`git log -1`)**: Baseline commit metadata for context.
+
+#### 2. Domain Entities
+- **`ChangeSet`**: A deterministic snapshot of current working tree changes, head commit, and file mutation summaries.
+- **`FileChange`**: Individual file mutation record supporting `ADDED`, `MODIFIED`, `DELETED`, and `RENAMED` changes, tracking line counts, line ranges, and staged/untracked flags.
+- **`DiffHunk`**: Structured hunk record preserving old/new line ranges, headers, and diff text.
+- **`EvidenceRecord`**: Source-backed factual observation (`GIT_STATUS`, `GIT_DIFF`, `WORKING_TREE`, `RECENT_COMMIT`) with zero inference of developer intent.
+
+#### 3. Storage & Schema
+- Persisted relationally in SQLite (`.buildcoach/state.db`) via `migration_v3` across tables `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` with cascading foreign keys and indexes.
+- Idempotent and deterministic: SHA-256 IDs for ChangeSets, FileChanges, DiffHunks, and EvidenceRecords.
+
 ---
 
 ## 2. Technology Strategy

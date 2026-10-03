@@ -110,9 +110,86 @@ def migration_v2(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_graph_edges_type ON graph_edges(project_id, edge_type)")
 
 
+def migration_v3(conn: sqlite3.Connection) -> None:
+    """Version 3: Development context (change_sets, file_changes, diff_hunks, evidence_records)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS change_sets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            head_commit TEXT,
+            is_dirty INTEGER NOT NULL,
+            total_changed_files INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_change_sets_project ON change_sets(project_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS file_changes (
+            id TEXT PRIMARY KEY,
+            change_set_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            old_path TEXT,
+            new_path TEXT NOT NULL,
+            change_type TEXT NOT NULL,
+            is_staged INTEGER NOT NULL,
+            is_untracked INTEGER NOT NULL,
+            old_line_count INTEGER,
+            new_line_count INTEGER,
+            line_ranges TEXT NOT NULL,
+            is_binary INTEGER NOT NULL,
+            FOREIGN KEY (change_set_id) REFERENCES change_sets(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_changes_set ON file_changes(change_set_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_changes_project ON file_changes(project_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS diff_hunks (
+            id TEXT PRIMARY KEY,
+            file_change_id TEXT NOT NULL,
+            change_set_id TEXT NOT NULL,
+            old_start INTEGER NOT NULL,
+            old_lines INTEGER NOT NULL,
+            new_start INTEGER NOT NULL,
+            new_lines INTEGER NOT NULL,
+            header TEXT,
+            content TEXT NOT NULL,
+            FOREIGN KEY (file_change_id) REFERENCES file_changes(id) ON DELETE CASCADE,
+            FOREIGN KEY (change_set_id) REFERENCES change_sets(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_diff_hunks_file_change ON diff_hunks(file_change_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_diff_hunks_set ON diff_hunks(change_set_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS evidence_records (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            change_set_id TEXT,
+            evidence_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            file_path TEXT,
+            observation TEXT NOT NULL,
+            raw_data TEXT,
+            confidence TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (change_set_id) REFERENCES change_sets(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_records_project ON evidence_records(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_records_set ON evidence_records(change_set_id)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
+    (3, "Development context: change_sets, file_changes, diff_hunks, evidence_records", migration_v3),
 ]
 
 

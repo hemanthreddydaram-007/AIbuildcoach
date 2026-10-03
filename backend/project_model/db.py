@@ -16,6 +16,11 @@ from backend.domain.models import (
     ProvenanceRecord,
     NodeType,
     EdgeType,
+    ChangeSet,
+    FileChange,
+    DiffHunk,
+    EvidenceRecord,
+    ChangeType,
 )
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
@@ -431,5 +436,291 @@ class Database:
                 )
 
             return ProjectGraph(project_id=project_id, nodes=nodes, edges=edges)
+        finally:
+            conn.close()
+
+    def save_change_set(self, change_set: ChangeSet) -> None:
+        """Persists a ChangeSet, its file changes, diff hunks, and evidence records atomically."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                # 1. Upsert change_set
+                conn.execute(
+                    """
+                    INSERT INTO change_sets (id, project_id, head_commit, is_dirty, total_changed_files, summary, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        head_commit = excluded.head_commit,
+                        is_dirty = excluded.is_dirty,
+                        total_changed_files = excluded.total_changed_files,
+                        summary = excluded.summary,
+                        created_at = excluded.created_at
+                    """,
+                    (
+                        change_set.id,
+                        change_set.project_id,
+                        change_set.git_state.head_commit,
+                        1 if change_set.git_state.is_dirty else 0,
+                        len(change_set.file_changes),
+                        json.dumps(change_set.summary),
+                        change_set.created_at,
+                    ),
+                )
+
+                # Delete existing child items for this change_set if re-saving
+                conn.execute("DELETE FROM diff_hunks WHERE change_set_id = ?", (change_set.id,))
+                conn.execute("DELETE FROM file_changes WHERE change_set_id = ?", (change_set.id,))
+                conn.execute("DELETE FROM evidence_records WHERE change_set_id = ?", (change_set.id,))
+
+                # 2. Insert file_changes
+                for fc in change_set.file_changes:
+                    conn.execute(
+                        """
+                        INSERT INTO file_changes (
+                            id, change_set_id, project_id, old_path, new_path, change_type,
+                            is_staged, is_untracked, old_line_count, new_line_count, line_ranges, is_binary
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            fc.id,
+                            change_set.id,
+                            change_set.project_id,
+                            fc.old_path,
+                            fc.new_path,
+                            fc.change_type,
+                            1 if fc.is_staged else 0,
+                            1 if fc.is_untracked else 0,
+                            fc.old_line_count,
+                            fc.new_line_count,
+                            json.dumps(fc.line_ranges),
+                            1 if fc.is_binary else 0,
+                        ),
+                    )
+
+                    # 3. Insert diff_hunks
+                    for hunk in fc.hunks:
+                        conn.execute(
+                            """
+                            INSERT INTO diff_hunks (
+                                id, file_change_id, change_set_id, old_start, old_lines, new_start, new_lines, header, content
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                hunk.id,
+                                fc.id,
+                                change_set.id,
+                                hunk.old_start,
+                                hunk.old_lines,
+                                hunk.new_start,
+                                hunk.new_lines,
+                                hunk.header,
+                                hunk.content,
+                            ),
+                        )
+
+                # 4. Insert evidence_records
+                for ev in change_set.evidence:
+                    conn.execute(
+                        """
+                        INSERT INTO evidence_records (
+                            id, project_id, change_set_id, evidence_type, source, file_path, observation, raw_data, confidence, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            ev.id,
+                            change_set.project_id,
+                            change_set.id,
+                            ev.evidence_type,
+                            ev.source,
+                            ev.file_path,
+                            ev.observation,
+                            ev.raw_data,
+                            ev.confidence,
+                            ev.created_at,
+                        ),
+                    )
+        finally:
+            conn.close()
+
+    def get_latest_change_set(self, project_id: str) -> Optional[ChangeSet]:
+        """Retrieves the latest ChangeSet recorded for a project."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM change_sets WHERE project_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+                (project_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self.get_change_set_by_id(row["id"])
+        finally:
+            conn.close()
+
+    def get_change_set_by_id(self, change_set_id: str) -> Optional[ChangeSet]:
+        """Retrieves a ChangeSet with all its file changes, diff hunks, and evidence records."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, project_id, head_commit, is_dirty, total_changed_files, summary, created_at
+                FROM change_sets WHERE id = ?
+                """,
+                (change_set_id,),
+            )
+            cs_row = cursor.fetchone()
+            if not cs_row:
+                return None
+
+            cursor.execute(
+                """
+                SELECT id, change_set_id, project_id, old_path, new_path, change_type,
+                       is_staged, is_untracked, old_line_count, new_line_count, line_ranges, is_binary
+                FROM file_changes WHERE change_set_id = ? ORDER BY new_path ASC, id ASC
+                """,
+                (change_set_id,),
+            )
+            fc_rows = cursor.fetchall()
+
+            cursor.execute(
+                """
+                SELECT id, file_change_id, change_set_id, old_start, old_lines, new_start, new_lines, header, content
+                FROM diff_hunks WHERE change_set_id = ? ORDER BY file_change_id ASC, new_start ASC, id ASC
+                """,
+                (change_set_id,),
+            )
+            hunk_rows = cursor.fetchall()
+            hunks_by_fc: Dict[str, List[DiffHunk]] = {}
+            for hr in hunk_rows:
+                fc_id = hr["file_change_id"]
+                if fc_id not in hunks_by_fc:
+                    hunks_by_fc[fc_id] = []
+                hunks_by_fc[fc_id].append(
+                    DiffHunk(
+                        id=hr["id"],
+                        file_change_id=fc_id,
+                        old_start=hr["old_start"],
+                        old_lines=hr["old_lines"],
+                        new_start=hr["new_start"],
+                        new_lines=hr["new_lines"],
+                        header=hr["header"],
+                        content=hr["content"],
+                    )
+                )
+
+            file_changes: List[FileChange] = []
+            for fcr in fc_rows:
+                fc_id = fcr["id"]
+                raw_ranges = json.loads(fcr["line_ranges"]) if fcr["line_ranges"] else []
+                ranges = [tuple(r) for r in raw_ranges]
+                file_changes.append(
+                    FileChange(
+                        id=fc_id,
+                        change_set_id=change_set_id,
+                        old_path=fcr["old_path"],
+                        new_path=fcr["new_path"],
+                        change_type=fcr["change_type"],
+                        is_staged=bool(fcr["is_staged"]),
+                        is_untracked=bool(fcr["is_untracked"]),
+                        old_line_count=fcr["old_line_count"],
+                        new_line_count=fcr["new_line_count"],
+                        line_ranges=ranges,
+                        hunks=hunks_by_fc.get(fc_id, []),
+                        is_binary=bool(fcr["is_binary"]),
+                    )
+                )
+
+            cursor.execute(
+                """
+                SELECT id, project_id, change_set_id, evidence_type, source, file_path, observation, raw_data, confidence, created_at
+                FROM evidence_records WHERE change_set_id = ? ORDER BY created_at ASC, id ASC
+                """,
+                (change_set_id,),
+            )
+            ev_rows = cursor.fetchall()
+            evidence: List[EvidenceRecord] = []
+            for er in ev_rows:
+                evidence.append(
+                    EvidenceRecord(
+                        id=er["id"],
+                        project_id=er["project_id"],
+                        change_set_id=er["change_set_id"],
+                        evidence_type=er["evidence_type"],
+                        source=er["source"],
+                        file_path=er["file_path"],
+                        observation=er["observation"],
+                        raw_data=er["raw_data"],
+                        confidence=er["confidence"],
+                        created_at=er["created_at"],
+                    )
+                )
+
+            cursor.execute(
+                "SELECT is_git_repo, current_branch, head_commit, is_dirty, untracked_count, modified_count, staged_count "
+                "FROM git_states WHERE project_id = ? ORDER BY id DESC LIMIT 1",
+                (cs_row["project_id"],),
+            )
+            gs_row = cursor.fetchone()
+            if gs_row:
+                git_state = GitState(
+                    is_git_repo=bool(gs_row["is_git_repo"]),
+                    current_branch=gs_row["current_branch"],
+                    head_commit=gs_row["head_commit"],
+                    is_dirty=bool(gs_row["is_dirty"]),
+                    untracked_count=gs_row["untracked_count"],
+                    modified_count=gs_row["modified_count"],
+                    staged_count=gs_row["staged_count"],
+                )
+            else:
+                git_state = GitState(
+                    is_git_repo=True if cs_row["head_commit"] else False,
+                    head_commit=cs_row["head_commit"],
+                    is_dirty=bool(cs_row["is_dirty"]),
+                )
+
+            summary = json.loads(cs_row["summary"]) if cs_row["summary"] else {}
+
+            return ChangeSet(
+                id=cs_row["id"],
+                project_id=cs_row["project_id"],
+                git_state=git_state,
+                file_changes=file_changes,
+                evidence=evidence,
+                summary=summary,
+                created_at=cs_row["created_at"],
+            )
+        finally:
+            conn.close()
+
+    def get_evidence_for_change_set(self, change_set_id: str) -> List[EvidenceRecord]:
+        """Retrieves evidence records linked to a specific change set."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, project_id, change_set_id, evidence_type, source, file_path, observation, raw_data, confidence, created_at
+                FROM evidence_records WHERE change_set_id = ? ORDER BY id ASC
+                """,
+                (change_set_id,),
+            )
+            rows = cursor.fetchall()
+            return [
+                EvidenceRecord(
+                    id=r["id"],
+                    project_id=r["project_id"],
+                    change_set_id=r["change_set_id"],
+                    evidence_type=r["evidence_type"],
+                    source=r["source"],
+                    file_path=r["file_path"],
+                    observation=r["observation"],
+                    raw_data=r["raw_data"],
+                    confidence=r["confidence"],
+                    created_at=r["created_at"],
+                )
+                for r in rows
+            ]
         finally:
             conn.close()
