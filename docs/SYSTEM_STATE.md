@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 6: Understand What Changed (Workflow 1)**
+**Milestone 7: "Can I Explain This?" Comprehension Loop**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -22,6 +22,7 @@ This document serves as the project's operational memory across development sess
   - M4: `ContextPurpose`, `ContextSourceType`, `ContextItem`, `ContextRequest`, `ContextPacket`.
   - M5: `ClaimType`, `StructuredClaim`, `ExplanationResponse`, `ConsentToken`, `TransmissionPreview`, `RawInteractionResponse`, `ValidatedGatewayResult`.
   - M6: `IntentEpistemicStatus`, `ChangeCategory`, `DeterministicFileChange`, `WhatChangedSection`, `IntentRationale`, `WhySection`, `LocalEvidenceTrace`, `EvidenceSection`, `ConceptToUnderstand`, `CanIExplainThisPrompt`, `ChangeExplanationPreview`, `UnderstandChangeResult`.
+  - M7: `ComprehensionRating`, `ComprehensionDimension`, `GapSeverity`, `RunStatus`, `KnowledgeGap`, `DimensionEvaluation`, `StudentExplanationSubmission`, `ReverificationPrompt`, `TargetedTeaching`, `ComprehensionEvaluationResult`, `ComprehensionRunRecord`.
 - Deterministic SQLite database (`.buildcoach/state.db`):
   - Explicit schema versioning and migration framework (`schema_migrations`, `projects`, `files`, `git_states`, `scan_runs`).
   - Migration v2: `graph_nodes` and `graph_edges` tables with cascading foreign keys and indexes.
@@ -29,6 +30,7 @@ This document serves as the project's operational memory across development sess
   - Migration v4: `context_requests`, `context_packets`, and `context_items` tables with composite primary keys, foreign keys, and indexes.
   - Migration v5: `gateway_runs` minimal local audit table tracking run ID, packet ID, provider, model, tokens, latency, claim counts, and timestamp.
   - Migration v6: `understand_change_runs` minimal local audit table tracking run ID, project ID, changeset ID, packet ID, gateway run ID, primary category, files changed count, grounding ratio, and timestamp.
+  - Migration v7: `comprehension_runs` minimal local operational table tracking run ID, project ID, changeset ID, packet ID, prompt ID, attempt number, run status, overall state, gap count, started at, and created at.
   - Deterministic caching (`cache_key`) for ContextPackets based on project ID, changeset ID, graph node/edge signature, purpose, target files, and token budget.
 - Safe, read-only Git state detector (`detect_git_state`):
   - Inspects branch name, HEAD commit hash, dirty flag, untracked/modified/staged file counts.
@@ -80,36 +82,42 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Does Not Work (Intentional Scope Boundaries)
-- Viva Question Generator / Comprehension Verification (scheduled for Milestones 6–8).
+- Viva Question Generator / Viva Defence Engine (scheduled for Milestone 8).
 - User-facing UI and VS Code extension (scheduled for Milestones 9–10).
 - No code generation, automated refactoring, or autonomous shell execution exists (prohibited across all milestones).
 
 ---
 
 ## What Was Tested
-- **Test Suite**: 122 automated tests passing in `tests/`:
-  - `test_understand_change.py` (12 tests):
-    1. Deterministic file and changeset categorization
-    2. Clean working tree preview with zero token cost and zero AI calls
-    3. Physical truth immutability (M3 file changes, counts, and types strictly preserved; supplementary AI narrative cannot alter physical reality)
-    4. File criticality calculation (relevance_score >= 90.0 on any context item)
-    5. Epistemic classification: EXPLICIT when actual explanatory comment/docstring exists
-    6. Epistemic classification: INFERRED with explicit unknown gap when unannotated
-    7. Verbatim local snippet resolution from ContextItem.content (never model text)
-    8. Evidence-supported concept formulation and CanIExplainThis prompt boundary (zero evaluation)
-    9. Provider-failure graceful fallback (M3 truth preserved, Why=UNKNOWN, CanIExplainThis is_available=False, zero invented AI content)
-    10. Consent token enforcement
-    11. Ungrounded and missing items in EvidenceSection
-    12. SQLite audit persistence in `understand_change_runs`
+- **Test Suite**: 139 automated tests passing in `tests/`:
+  - `test_comprehension.py` (17 tests):
+    1. Canonical M6 context binding validation
+    2. Fast-path empty & repetitive gibberish rejection & persistence without AI gateway calls
+    3. Meaningful short answers bypass fast-path to semantic evaluation
+    4. XML escaping and prompt-injection defense
+    5. Atomic attempt progression & 3-attempt hard cap
+    6. Attempt blocking once UNDERSTOOD is reached
+    7. Stale IN_PROGRESS crash recovery (>180s)
+    8. Complete 4-dimension grounding verification
+    9. Ungrounded dimension claims forced to UNKNOWN
+    10. Duplicate dimension claims forced to UNKNOWN without last-write-wins
+    11. Ungrounded gap claims included in consumed_claims, invalidating overall groundedness
+    12. Strict teaching annotation binding
+    13. Teaching summary decoupled from gateway summary
+    14. Epistemic honesty reward when WhySection intent is UNKNOWN
+    15. Terminal run guarantee with bare exception re-raise on unexpected processing failures
+    16. Zero student text persistence in SQLite
+    17. Deterministic overall state precedence
+  - `test_understand_change.py` (12 tests): File and changeset categorization, physical truth immutability, criticality, epistemic classification, local snippets, prompt boundary, fallback, consent.
   - `test_ai_gateway.py` (23 tests): Consent, BYOK credentials, Interactions API payload shape, timeouts, retries, grounding.
   - `test_context_engine.py` (32 tests): Pipeline, scoring, secret detection, redaction, budget truncation, compression, caching.
   - `test_context.py` (18 tests): ChangeSets, FileChanges, DiffHunks, EvidenceRecords, Git status/diff parsing, determinism, syncing.
-  - `test_db.py` (5 tests): Migrations v1–v6, CRUD, syncing, large file sets.
+  - `test_db.py` (5 tests): Migrations v1–v7, CRUD, syncing, large file sets.
   - `test_git_detector.py` (3 tests): Non-git, worktree, empty and dirty repos.
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 122 passed in 30.22s.
+- **Live Local Test**: 139 passed in 18.61s.
 
 ---
 
@@ -121,9 +129,9 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Next Milestone
-**Milestone 7: "Can I Explain This?" Comprehension Loop**
-- Interactive comprehension question presentation.
-- Human answer collection and multi-dimensional evaluation (Purpose, Mechanism, Failure Modes, Impact).
-- Qualitative grading (`UNDERSTOOD`, `PARTIALLY UNDERSTOOD`, `NEEDS REVIEW`, `UNKNOWN`) without uncalibrated percentages.
-- Knowledge gap detection and targeted follow-up question generation.
+**Milestone 8: Workflow 2: Viva Defence Engine**
+- Project-specific viva preparation engine.
+- Multi-tier difficulty question generator (EASY, MEDIUM, HARD, DEEP).
+- Grounded defence evaluation across architectural modules.
+- Micro-teaching and targeted re-testing.
 

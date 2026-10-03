@@ -2,6 +2,8 @@
 
 import sqlite3
 import json
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Set
 
@@ -1018,6 +1020,169 @@ class Database:
             if not row:
                 return None
             return dict(row)
+        finally:
+            conn.close()
+
+    def reserve_comprehension_attempt(
+        self,
+        project_id: str,
+        changeset_id: str,
+        prompt_id: str,
+        packet_id: str,
+        attempt_number: int,
+        timeout_seconds: float = 180.0,
+    ) -> str:
+        """Atomically validates attempt progression with stale crash recovery and reserves the attempt slot.
+        Stale timeout (default 180s) is safely larger than the maximum expected gateway execution duration.
+        """
+        from backend.domain.models import utc_now_iso
+        from backend.comprehension.exceptions import (
+            InvalidAttemptProgressionError,
+            ConcurrentAttemptError,
+        )
+
+        run_id = f"crun_{uuid.uuid4().hex[:16]}"
+        now_iso = utc_now_iso()
+        now_dt = datetime.now(timezone.utc)
+
+        conn = self.get_connection()
+        conn.isolation_level = None  # Explicit transaction control for BEGIN IMMEDIATE
+        try:
+            cursor = conn.cursor()
+            cursor.execute("BEGIN IMMEDIATE")
+            try:
+                cursor.execute(
+                    """
+                    SELECT run_id, attempt_number, run_status, overall_state, started_at 
+                    FROM comprehension_runs 
+                    WHERE project_id = ? AND changeset_id = ? AND prompt_id = ? 
+                    ORDER BY attempt_number DESC LIMIT 1
+                    """,
+                    (project_id, changeset_id, prompt_id),
+                )
+                row = cursor.fetchone()
+
+                if row is None:
+                    if attempt_number != 1:
+                        raise InvalidAttemptProgressionError(f"First attempt must be 1, got {attempt_number}")
+                else:
+                    last_run_id = row["run_id"]
+                    last_attempt = row["attempt_number"]
+                    last_status = row["run_status"]
+                    last_state = row["overall_state"]
+                    started_at_str = row["started_at"]
+
+                    # Stale run recovery: IN_PROGRESS older than recovery timeout -> FAILED
+                    if last_status == "IN_PROGRESS":
+                        try:
+                            started_dt = datetime.fromisoformat(started_at_str.replace("Z", "+00:00"))
+                            elapsed = (now_dt - started_dt).total_seconds()
+                        except Exception:
+                            elapsed = timeout_seconds + 1.0
+
+                        if elapsed > timeout_seconds:
+                            cursor.execute(
+                                """
+                                UPDATE comprehension_runs 
+                                SET run_status = 'FAILED', overall_state = 'UNKNOWN' 
+                                WHERE run_id = ?
+                                """,
+                                (last_run_id,),
+                            )
+                            last_status = "FAILED"
+                        else:
+                            raise ConcurrentAttemptError(f"Attempt {last_attempt} is currently IN_PROGRESS.")
+
+                    if last_state == "UNDERSTOOD":
+                        raise InvalidAttemptProgressionError("Prompt already UNDERSTOOD; further attempts disallowed.")
+                    if last_attempt >= 3:
+                        raise InvalidAttemptProgressionError("Maximum attempt limit (3) reached.")
+                    if attempt_number != last_attempt + 1:
+                        raise InvalidAttemptProgressionError(f"Expected attempt {last_attempt + 1}, got {attempt_number}")
+
+                cursor.execute(
+                    """
+                    INSERT INTO comprehension_runs (
+                        run_id, project_id, changeset_id, packet_id, prompt_id,
+                        attempt_number, run_status, overall_state, gap_count, started_at, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'IN_PROGRESS', 'UNKNOWN', 0, ?, ?)
+                    """,
+                    (run_id, project_id, changeset_id, packet_id, prompt_id, attempt_number, now_iso, now_iso),
+                )
+                cursor.execute("COMMIT")
+                return run_id
+            except Exception:
+                cursor.execute("ROLLBACK")
+                raise
+        finally:
+            conn.close()
+
+    def finalize_comprehension_run(
+        self,
+        run_id: str,
+        run_status: str,
+        overall_state: str,
+        gap_count: int,
+    ) -> None:
+        """Updates reserved attempt record upon completion or failure."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    UPDATE comprehension_runs 
+                    SET run_status = ?, overall_state = ?, gap_count = ?
+                    WHERE run_id = ?
+                    """,
+                    (run_status, overall_state, gap_count, run_id),
+                )
+        finally:
+            conn.close()
+
+    def get_latest_comprehension_run(
+        self,
+        project_id: str,
+        changeset_id: str,
+        prompt_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest comprehension run record for a prompt."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM comprehension_runs 
+                WHERE project_id = ? AND changeset_id = ? AND prompt_id = ? 
+                ORDER BY attempt_number DESC LIMIT 1
+                """,
+                (project_id, changeset_id, prompt_id),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return dict(row)
+        finally:
+            conn.close()
+
+    def get_comprehension_runs(
+        self,
+        project_id: str,
+        changeset_id: str,
+        prompt_id: str,
+    ) -> List[Dict[str, Any]]:
+        """Retrieves all comprehension run records for a prompt ordered by attempt number."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM comprehension_runs 
+                WHERE project_id = ? AND changeset_id = ? AND prompt_id = ? 
+                ORDER BY attempt_number ASC
+                """,
+                (project_id, changeset_id, prompt_id),
+            )
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 

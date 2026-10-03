@@ -115,7 +115,7 @@ Every milestone must strictly execute the following engineering cycle before pro
   - Evaluation of user-submitted explanations against code evidence.
   - Qualitative comprehension classification (`UNDERSTOOD`, `PARTIALLY UNDERSTOOD`, `NEEDS REVIEW`, `UNKNOWN`).
   - Targeted follow-up question generation.
-- **Gate**: Evaluates answers objectively against concrete code mechanisms without using uncalibrated percentage scores.
+- **Gate**: Evaluates answers objectively against concrete code mechanisms without using uncalibrated percentage scores. [Status: COMPLETED - 139/139 tests passing]
 
 #### Milestone 8 — Workflow 2: Viva Defence Engine
 - **Goal**: Project-specific viva preparation engine.

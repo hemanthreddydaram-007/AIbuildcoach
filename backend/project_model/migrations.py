@@ -287,6 +287,28 @@ def migration_v6(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_understand_change_set ON understand_change_runs(changeset_id)")
 
 
+def migration_v7(conn: sqlite3.Connection) -> None:
+    """Version 7: Comprehension runs (comprehension_runs)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comprehension_runs (
+            run_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            changeset_id TEXT NOT NULL,
+            packet_id TEXT NOT NULL,
+            prompt_id TEXT NOT NULL,
+            attempt_number INTEGER NOT NULL,
+            run_status TEXT NOT NULL,
+            overall_state TEXT NOT NULL,
+            gap_count INTEGER NOT NULL,
+            started_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            CONSTRAINT uq_comprehension_attempt UNIQUE (project_id, changeset_id, prompt_id, attempt_number)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_comprehension_runs_lookup ON comprehension_runs(project_id, changeset_id, prompt_id, attempt_number)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
@@ -294,6 +316,7 @@ MIGRATIONS: List[Migration] = [
     (4, "Context engine: context_requests, context_packets, context_items", migration_v4),
     (5, "AI Gateway: gateway_runs", migration_v5),
     (6, "Understand What Changed: understand_change_runs", migration_v6),
+    (7, "Comprehension runs: comprehension_runs", migration_v7),
 ]
 
 
