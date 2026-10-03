@@ -967,4 +967,59 @@ class Database:
         finally:
             conn.close()
 
+    def record_understand_change_run(
+        self,
+        run_id: str,
+        project_id: str,
+        changeset_id: str,
+        packet_id: str,
+        gateway_run_id: Optional[str],
+        primary_category: str,
+        files_changed_count: int,
+        grounding_ratio: float,
+        created_at: Optional[str] = None,
+    ) -> None:
+        """Records an execution of the Understand What Changed workflow in the local audit table."""
+        from backend.domain.models import utc_now_iso
+
+        ts = created_at or utc_now_iso()
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO understand_change_runs (
+                        id, project_id, changeset_id, packet_id, gateway_run_id,
+                        primary_category, files_changed_count, grounding_ratio, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        project_id,
+                        changeset_id,
+                        packet_id,
+                        gateway_run_id,
+                        primary_category,
+                        files_changed_count,
+                        grounding_ratio,
+                        ts,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_understand_change_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves an understand_change run audit entry by ID."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM understand_change_runs WHERE id = ?", (run_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return dict(row)
+        finally:
+            conn.close()
+
+
 

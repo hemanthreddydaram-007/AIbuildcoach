@@ -123,6 +123,14 @@ Before any context packet is assembled or cached for future external provider us
 - All unit and integration tests strictly mock external HTTP requests via `unittest.mock.patch('urllib.request.urlopen')`.
 - Zero live API calls and zero actual API keys are used during automated testing.
 
+### 5.6 Understand What Changed Security Invariants (Milestone 6)
+- **Physical Truth Immutability**: The LLM is strictly prohibited from deciding what changed. The file list, change types, and line counts are sourced 100% deterministically from M3 `ChangeSet`.
+- **Verbatim Local Snippet Resolution**: Evidence snippets are never sourced from model-generated text. They are resolved locally:
+  $$\text{claim.evidence\_refs} \longrightarrow \text{ContextItem.item\_id} \longrightarrow \text{local ContextItem.content} \longrightarrow \text{snippet}$$
+  This guarantees that code snippets presented to the developer are verbatim local disk contents already sanitized by M4 secret redaction.
+- **Epistemic Integrity**: Inferences are explicitly segregated from observations. Rationale is marked `EXPLICIT` only when verified explanatory text exists in comments or commit messages; otherwise, it is labeled `INFERRED` with explicit `UNKNOWN` markers.
+- **Fail-Safe Fallback**: In the event of provider timeouts or errors, the workflow degrades gracefully by presenting deterministic M3 diffs with zero invented AI text.
+
 ---
 
 ## 6. Milestone Security Review Protocol

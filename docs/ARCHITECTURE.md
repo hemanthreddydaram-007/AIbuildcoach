@@ -269,7 +269,48 @@ The AI Gateway provides a decoupled, provider-independent integration layer that
 
 ---
 
-## 7. Evidence Object Model & Provenance
+## 7. Workflow 1: Understand What Changed (Milestone 6)
+
+The "Understand What Changed" engine synthesizes physical repository changes (M3), contextual relevance and redacted evidence (M4), and validated model explanations (M5) into a structured domain result (`UnderstandChangeResult`) organized into 5 mental-model sections:
+
+```
++------------------------------------------------------------------------------------+
+|                         UNDERSTAND WHAT CHANGED ARCHITECTURE                       |
++------------------------------------------------------------------------------------+
+|  1. WHAT CHANGED? (100% Deterministic M3 Physical Truth)                           |
+|     - Changed files, change types, and line counts from M3 ChangeSet/DiffHunks     |
+|     - Functional categories via DeterministicCategorizer                          |
+|     - Supplementary AI narrative (strictly cannot alter physical truth)            |
++------------------------------------------------------------------------------------+
+|  2. WHY? (Epistemically Explicit Rationale)                                        |
+|     - EXPLICIT: Supported by genuine explanatory comments, docstrings, or commits  |
+|     - INFERRED: Grounded model inferences explicitly labeled as deductions          |
+|     - UNKNOWN: Explicit markers for unproven intent or missing rationale           |
++------------------------------------------------------------------------------------+
+|  3. EVIDENCE & PROVENANCE (Source Snippet Traceability)                            |
+|     - Verbatim snippets resolved locally from ContextItem.content (never LLM text) |
+|     - Segregated into Grounded Traces and Ungrounded/Unknown Traces                |
++------------------------------------------------------------------------------------+
+|  4. WHAT SHOULD I UNDERSTAND? (Grounded Architectural Concepts)                     |
+|     - Concepts grounded in M5 claims, M2 graph relationships, and M3 code diffs    |
+|     - Every concept requires supporting ContextItem IDs                            |
++------------------------------------------------------------------------------------+
+|  5. CAN I EXPLAIN THIS? (Interactive Recall Prompt — M7 Boundary)                 |
+|     - Targeted question testing Purpose, Mechanism, Failure Modes, and Impact     |
+|     - Zero evaluation, scoring, or knowledge tracking (strictly deferred to M7)    |
++------------------------------------------------------------------------------------+
+```
+
+### Operation Separation:
+- **`prepare_change_explanation()`**: Fast, read-only inspection returning `ChangeExplanationPreview` with exact file list and token budget for user review. Never requires API keys.
+- **`explain_changes()`**: Consumes explicit `ConsentToken` and coordinates `AIGateway` with zero-loss fallback handling on provider timeout or failure.
+
+### Persistence:
+- Operational metrics recorded in SQLite table `understand_change_runs` (`id`, `project_id`, `changeset_id`, `packet_id`, `gateway_run_id`, `primary_category`, `files_changed_count`, `grounding_ratio`, `created_at`). Zero project source code stored.
+
+---
+
+## 8. Evidence Object Model & Provenance
 
 Every statement presented to the user must be backed by an evidence model:
 

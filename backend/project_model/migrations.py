@@ -267,12 +267,33 @@ def migration_v5(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_gateway_runs_packet ON gateway_runs(packet_id)")
 
 
+def migration_v6(conn: sqlite3.Connection) -> None:
+    """Version 6: Understand What Changed audit table (understand_change_runs)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS understand_change_runs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            changeset_id TEXT NOT NULL,
+            packet_id TEXT NOT NULL,
+            gateway_run_id TEXT,
+            primary_category TEXT NOT NULL,
+            files_changed_count INTEGER NOT NULL,
+            grounding_ratio REAL NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_understand_change_project ON understand_change_runs(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_understand_change_set ON understand_change_runs(changeset_id)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
     (3, "Development context: change_sets, file_changes, diff_hunks, evidence_records", migration_v3),
     (4, "Context engine: context_requests, context_packets, context_items", migration_v4),
     (5, "AI Gateway: gateway_runs", migration_v5),
+    (6, "Understand What Changed: understand_change_runs", migration_v6),
 ]
 
 

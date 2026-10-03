@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 5: AI Gateway (Gemini 3.8 Flash, Consent, BYOK, Anti-Hallucination Grounding)**
+**Milestone 6: Understand What Changed (Workflow 1)**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -21,12 +21,14 @@ This document serves as the project's operational memory across development sess
   - M3: `ChangeSet`, `FileChange`, `DiffHunk`, `EvidenceRecord`, `ChangeType`.
   - M4: `ContextPurpose`, `ContextSourceType`, `ContextItem`, `ContextRequest`, `ContextPacket`.
   - M5: `ClaimType`, `StructuredClaim`, `ExplanationResponse`, `ConsentToken`, `TransmissionPreview`, `RawInteractionResponse`, `ValidatedGatewayResult`.
+  - M6: `IntentEpistemicStatus`, `ChangeCategory`, `DeterministicFileChange`, `WhatChangedSection`, `IntentRationale`, `WhySection`, `LocalEvidenceTrace`, `EvidenceSection`, `ConceptToUnderstand`, `CanIExplainThisPrompt`, `ChangeExplanationPreview`, `UnderstandChangeResult`.
 - Deterministic SQLite database (`.buildcoach/state.db`):
   - Explicit schema versioning and migration framework (`schema_migrations`, `projects`, `files`, `git_states`, `scan_runs`).
   - Migration v2: `graph_nodes` and `graph_edges` tables with cascading foreign keys and indexes.
   - Migration v3: `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` tables with cascading foreign keys and indexes.
   - Migration v4: `context_requests`, `context_packets`, and `context_items` tables with composite primary keys, foreign keys, and indexes.
   - Migration v5: `gateway_runs` minimal local audit table tracking run ID, packet ID, provider, model, tokens, latency, claim counts, and timestamp.
+  - Migration v6: `understand_change_runs` minimal local audit table tracking run ID, project ID, changeset ID, packet ID, gateway run ID, primary category, files changed count, grounding ratio, and timestamp.
   - Deterministic caching (`cache_key`) for ContextPackets based on project ID, changeset ID, graph node/edge signature, purpose, target files, and token budget.
 - Safe, read-only Git state detector (`detect_git_state`):
   - Inspects branch name, HEAD commit hash, dirty flag, untracked/modified/staged file counts.
@@ -85,39 +87,29 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Was Tested
-- **Test Suite**: 110 automated tests passing in `tests/`:
-  - `test_ai_gateway.py` (23 tests):
-    1. Deterministic packet hash computation
-    2. Packet hash alteration detection upon tampering
-    3. Human-inspectable transmission preview generation
-    4. Consent granting and successful validation
-    5. Consent rejection (unacknowledged, packet ID mismatch, hash mismatch, provider mismatch, model mismatch, expiration)
-    6. Credential store explicit parameter resolution
-    7. Credential store environment variable resolution
-    8. Credential store missing key rejection
-    9. Credential store detection and active rejection of secrets in `config.json`
-    10. Credential key masking for diagnostics
-    11. Evidence validator grounding of valid claim references
-    12. Evidence validator coercion of unknown references from OBSERVATION to UNKNOWN
-    13. Evidence validator detection of uninspected file paths
-    14. Evidence validator handling of claims with zero citations
-    15. Gemini adapter request payload shape verification (Interactions API format)
-    16. Gemini adapter successful mock HTTP interaction and usage parsing
-    17. Ambiguous POST network timeout non-retry guarantee
-    18. Transient HTTP 429 exponential backoff retry
-    19. Fatal HTTP 401 unauthorized non-retry
-    20. Full end-to-end AIGateway execution pipeline and SQLite audit logging
-    21. Consent violation halting execution before provider call
-    22. Missing credentials halting execution before provider call
-    23. Malformed model response error handling
+- **Test Suite**: 122 automated tests passing in `tests/`:
+  - `test_understand_change.py` (12 tests):
+    1. Deterministic file and changeset categorization
+    2. Clean working tree preview with zero token cost and zero AI calls
+    3. Physical truth immutability (M3 file changes, counts, and types strictly preserved; supplementary AI narrative cannot alter physical reality)
+    4. File criticality calculation (relevance_score >= 90.0 on any context item)
+    5. Epistemic classification: EXPLICIT when actual explanatory comment/docstring exists
+    6. Epistemic classification: INFERRED with explicit unknown gap when unannotated
+    7. Verbatim local snippet resolution from ContextItem.content (never model text)
+    8. Evidence-supported concept formulation and CanIExplainThis prompt boundary (zero evaluation)
+    9. Provider-failure graceful fallback (M3 truth preserved, Why=UNKNOWN, CanIExplainThis is_available=False, zero invented AI content)
+    10. Consent token enforcement
+    11. Ungrounded and missing items in EvidenceSection
+    12. SQLite audit persistence in `understand_change_runs`
+  - `test_ai_gateway.py` (23 tests): Consent, BYOK credentials, Interactions API payload shape, timeouts, retries, grounding.
   - `test_context_engine.py` (32 tests): Pipeline, scoring, secret detection, redaction, budget truncation, compression, caching.
   - `test_context.py` (18 tests): ChangeSets, FileChanges, DiffHunks, EvidenceRecords, Git status/diff parsing, determinism, syncing.
-  - `test_db.py` (5 tests): Migrations v1–v5, CRUD, syncing, large file sets.
+  - `test_db.py` (5 tests): Migrations v1–v6, CRUD, syncing, large file sets.
   - `test_git_detector.py` (3 tests): Non-git, worktree, empty and dirty repos.
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 110 passed in 28.03s.
+- **Live Local Test**: 122 passed in 30.22s.
 
 ---
 
@@ -129,7 +121,9 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Next Milestone
-**Milestone 6: Change Summarizer & Explanation Engine**
-- Synthesize change sets and context packets into layered, human-understandable architectural explanations.
-- Grounded claim generation backed by verifiable project evidence.
+**Milestone 7: "Can I Explain This?" Comprehension Loop**
+- Interactive comprehension question presentation.
+- Human answer collection and multi-dimensional evaluation (Purpose, Mechanism, Failure Modes, Impact).
+- Qualitative grading (`UNDERSTOOD`, `PARTIALLY UNDERSTOOD`, `NEEDS REVIEW`, `UNKNOWN`) without uncalibrated percentages.
+- Knowledge gap detection and targeted follow-up question generation.
 

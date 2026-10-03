@@ -259,4 +259,48 @@ Adopt Option 3.
 ### Date
 2026-10-03
 
+---
+
+## ADR-0009: Milestone 6 Understand What Changed Architecture, Physical Truth Invariance, and Epistemic Qualification
+
+### Status
+Accepted
+
+### Context
+Milestone 6 introduces the first user-facing workflow in AI Build Coach: "Understand What Changed". Previous milestones built deterministic evidence layers (M1–M3), a safe context engine (M4), and an anti-hallucination AI Gateway (M5). When explaining code changes to a human developer or student, several critical architectural failure modes can arise:
+1. Model-Invented Changes: The LLM claims files changed or were deleted that were never touched in the physical repository.
+2. Epistemic Conflation: Inferred author intent is reported to the human as verified fact.
+3. Model-Generated Evidence Snippets: Code snippets displayed in evidence traces are synthesized or edited by the LLM, misleading the developer.
+4. Conflating Preparation with Execution: Asking for consent, reading API keys, and making network calls in a single opaque step prevents the developer from inspecting the diff and token budget beforehand.
+5. Catastrophic Crash on Provider Outage: External API timeouts or rate limits crashing the local inspection workflow.
+
+### Options Considered
+1. **End-to-End LLM Generation**: Send the diff to the model and ask it to output a markdown report containing what changed, why, snippets, and questions. Rejects the core product principle: the LLM becomes an unverified source of truth, invents files, hallucinates before/after code, and fails completely when offline.
+2. **Deterministic-Only Dumps**: Present only the git diff and porcelain status. Fast and 100% physically true, but provides zero architectural synthesis or conceptual guidance for junior developers.
+3. **Layered Physical Truth Invariance with Grounded Epistemic Synthesis**:
+   - What Changed is 100% anchored in M3 `ChangeSet`: file list, change types, and line counts are immutable physical facts from git.
+   - Supplementary AI narrative is strictly supplementary and cannot alter physical truth.
+   - Why section is epistemically explicit (`EXPLICIT` only with genuine comments/docs/commits; `INFERRED` for deductions; `UNKNOWN` for missing rationale).
+   - Evidence snippets are resolved locally from `ContextItem.content` (never model text).
+   - Two distinct operations: `prepare_change_explanation` (read-only preview, no API keys) and `explain_changes` (consent-governed execution).
+   - Safe provider-failure fallback returning deterministic M3 diffs with `Why = UNKNOWN`.
+
+### Chosen Approach
+Adopt Option 3.
+
+### Rationale
+- Guarantees 100% physical truth immutability: the developer can always trust the file list and line counts.
+- Enforces intellectual honesty: inferences are never masqueraded as facts, and unstated rationales are clearly reported as `UNKNOWN`.
+- Evidence snippets match local repository contents verbatim.
+- Developers retain full control over context transmission via the preparation preview.
+- Local workflow remains completely functional even during complete external AI provider outages.
+
+### Trade-offs & Consequences
+- Rationale detection requires heuristic comment and commit parsing to distinguish between explicit author statements and deductions.
+- Local snippet resolution requires maintaining item ID mappings between gateway claim references and the context packet.
+
+### Date
+2026-10-03
+
+
 

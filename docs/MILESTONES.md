@@ -95,13 +95,18 @@ Every milestone must strictly execute the following engineering cycle before pro
   - 100% mocked offline tests (zero external network requests).
 - **Gate**: Validates consent, keys, request shape, timeout non-retry, 429/503 retry, and grounding metrics. [Status: COMPLETED - 110/110 tests passing]
 
-#### Milestone 6 — Workflow 1: Understand the Change
-- **Goal**: End-to-end implementation of "Understand the Change".
+#### Milestone 6 — Workflow 1: Understand What Changed
+- **Goal**: End-to-end implementation of "Understand What Changed".
 - **Scope**:
-  - Summarize main changes, before/after behavior, and critical files.
-  - Provenance tagging (`OBSERVATION`, `INFERENCE`, `RECOMMENDATION`, `UNKNOWN`).
-  - Claim validation preventing hallucinated claims.
-- **Gate**: Verification on synthetic diffs accurately separates observations from inferences.
+  - Deterministic "What Changed?" (100% physical truth from M3 ChangeSet; file paths, types, and line counts immutable).
+  - Epistemically explicit "Why?" (`EXPLICIT` only with genuine comments/docs/commits; `INFERRED` for deductions; `UNKNOWN` for missing rationale).
+  - Verbatim local snippet resolution from `ContextItem.content` (never model text).
+  - Evidence-backed concept formulation (`WhatShouldIUnderstand`).
+  - Interactive recall prompt generator (`CanIExplainThisPrompt` — zero evaluation/scoring in M6).
+  - Strict separation of preparation (`prepare_change_explanation`) and execution (`explain_changes`).
+  - Safe provider-failure fallback with zero invented AI content.
+  - Minimal SQLite audit logging (`understand_change_runs`).
+- **Gate**: Physical truth immutability, epistemic separation, local snippet resolution, and fallback verified. [Status: COMPLETED - 122/122 tests passing]
 
 #### Milestone 7 — "Can I Explain This?" Comprehension Loop
 - **Goal**: Active recall and evaluation engine.
