@@ -223,30 +223,49 @@ AI Build Coach operates locally on the user's filesystem. Local state is stored 
 
 ---
 
-## 6. AI Gateway & Provider Abstraction
+## 6. AI Gateway & Provider Abstraction (Milestone 5)
 
-The system must not be hardcoded to any single LLM provider. The backend interacts through an abstract interface:
+The AI Gateway provides a decoupled, provider-independent integration layer that safely consumes the M4 `ContextPacket` and coordinates external AI reasoning with zero-trust security and anti-hallucination validation.
 
-```python
-class AIProvider(ABC):
-    @abstractmethod
-    def explain_change(self, context_packet: ContextPacket) -> ChangeExplanation:
-        """Summarizes changes and provides grounded evidence."""
-        pass
-
-    @abstractmethod
-    def evaluate_comprehension(self, question: str, user_answer: str, context: ContextPacket) -> ComprehensionEvaluation:
-        """Evaluates human understanding against project evidence."""
-        pass
-
-    @abstractmethod
-    def generate_viva_questions(self, project_summary: ProjectContext, difficulty: DifficultyLevel) -> list[VivaQuestion]:
-        """Generates project-specific viva defence questions."""
-        pass
+```
++-------------------------------------------------------------------------------+
+|                                AI GATEWAY PIPELINE                            |
++-------------------------------------------------------------------------------+
+|  ContextPacket (from M4)                                                      |
+|       ↓                                                                       |
+|  ConsentManager.validate_consent() [6-tuple cryptographic token binding]       |
+|       ↓                                                                       |
+|  CredentialStore.get_gemini_api_key() [BYOK env vars, config.json forbidden] |
+|       ↓                                                                       |
+|  Zero-Trust Prompt Fencer [<untrusted_project_evidence>, anti-injection sys]  |
+|       ↓                                                                       |
+|  GeminiInteractionsAdapter [Gemini 3.8 Flash via stdlib urllib.request]       |
+|       ↓                                                                       |
+|  Layered Response Parser [extracts JSON matching ExplanationResponse schema]  |
+|       ↓                                                                       |
+|  EvidenceValidator [canonical ContextItem.item_id check, coerce to UNKNOWN]  |
+|       ↓                                                                       |
+|  SQLite Audit Logging [gateway_runs table in .buildcoach/state.db]            |
+|       ↓                                                                       |
+|  ValidatedGatewayResult                                                       |
++-------------------------------------------------------------------------------+
 ```
 
-- V1 implements a single provider (e.g. Gemini via standard HTTP/SDK), but all internal modules only reference `AIProvider`.
-- Handles timeouts, rate limits, network outages, and malformed model responses gracefully without crashing local operations.
+### Core Components
+1. **`AIGateway` Orchestrator**: Provider-agnostic coordinator executing the end-to-end reasoning pipeline.
+2. **`AIProviderAdapter`**: Abstract base contract (`complete_interaction(...)`) allowing future providers without modifying gateway logic.
+3. **`GeminiInteractionsAdapter`**: Concrete transport for Google Gemini 3.8 Flash (`gemini-3.8-flash`) implemented using standard library `urllib.request` (zero third-party SDK dependencies).
+   - Strict payload structure: `model`, `system_instruction` (plain string), `input` (plain string), `response_format` (`type="text"`, `mime_type="application/json"`, `schema`), `generation_config={"thinking_level": "low"}`, `store=False`.
+   - Never retries ambiguous network timeouts on POST requests.
+   - Exponential backoff retry on transient HTTP 429 and HTTP 503 errors (up to 2 retries).
+4. **`ConsentManager`**: Enforces explicit human consent prior to any external context transmission.
+   - Generates inspectable `TransmissionPreview`.
+   - Issues and verifies `ConsentToken` cryptographically bound to the 6-tuple `(user_acknowledged, packet_id, packet_hash, provider, model, expires_at)`.
+5. **`CredentialStore`**: Bring-Your-Own-Key (BYOK) manager resolving `GEMINI_API_KEY` / `BUILDCOACH_GEMINI_API_KEY` from environment variables. Actively scans `.buildcoach/config.json` and raises `SecurityConfigurationError` if sensitive credentials appear on disk.
+6. **`EvidenceValidator`**: Anti-hallucination verification engine.
+   - Validates claim citations against the canonical `ContextItem.item_id` namespace.
+   - Unsupported factual observations are never silently rewritten into inferences; they are strictly marked ungrounded and coerced to `UNKNOWN` or rejected.
+7. **Audit Persistence (`gateway_runs`)**: Local SQLite record capturing run metrics, latency, token usage, and grounding ratios without creating brittle foreign keys on ephemeral context packets.
 
 ---
 

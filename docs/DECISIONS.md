@@ -211,3 +211,52 @@ Adopt Option 3. ContextEngine operates purely with deterministic Python algorith
 ### Date
 2026-10-03
 
+---
+
+## ADR-0008: AI Gateway Architecture, Gemini Interactions API Standard Transport, and Anti-Hallucination Evidence Validation
+
+### Status
+Accepted
+
+### Context
+Milestone 5 introduces the first external AI provider integration in AI Build Coach. Consuming the M4 `ContextPacket` and sending it to external models introduces critical architectural challenges:
+1. Vendor lock-in: Coupling the core application logic to a specific provider or heavy SDK.
+2. Inadvertent prompt injection: Malicious text embedded in scanned user files manipulating model directives.
+3. Secret leakage: API keys checked into repository configuration files or logged in diagnostics.
+4. Unauthorized transmission: Sending proprietary project source code to external servers without explicit user approval.
+5. Model hallucination: Models inventing unsupported claims or claiming file modifications without proof.
+6. Ambiguous network retries: Retrying state-dependent POST requests on timeout.
+
+### Options Considered
+1. **Third-Party AI SDKs (`google-genai`, `openai`, `langchain`)**: High convenience, but brings hundreds of transitive dependencies, frequent API churn, opaque network handling, and tight vendor coupling.
+2. **Generic Chat Completion Endpoint with Freeform Markdown Output**: Simple prompt formatting, but results in unpredictable output shapes, requires fragile regex parsing, and provides zero grounding verification.
+3. **Provider-Agnostic AI Gateway with Gemini Interactions API Transport, Cryptographic Consent, and Evidence Validation**:
+   - Provider-independent `AIGateway` interface decoupled from concrete transports.
+   - Single concrete adapter: `GeminiInteractionsAdapter` for Gemini 3.8 Flash (`gemini-3.8-flash`) implemented using Python standard-library `urllib.request` (zero SDK dependencies).
+   - Gemini Interactions API request shape: `model`, plain string `system_instruction`, plain string `input`, `response_format={"type": "text", "mime_type": "application/json", "schema": ...}`, `generation_config={"thinking_level": "low"}`, `store=False`.
+   - Explicit human consent via `ConsentToken` cryptographically bound to 6-tuple `(user_acknowledged, packet_id, packet_hash, provider, model, expires_at)`.
+   - BYOK credential handling strictly via environment variables, actively raising `SecurityConfigurationError` if credentials exist in `.buildcoach/config.json`.
+   - Zero-trust prompt fencing wrapping project code inside `<untrusted_project_evidence>` tags with explicit anti-injection instructions.
+   - Canonical `ContextItem.item_id` evidence namespace: claims citing missing/invalid evidence are marked `grounded=False` and coerced to `UNKNOWN` (never silently mutated to `INFERENCE`).
+   - Timeout and retry safety: ambiguous POST timeouts are never retried; transient HTTP 429/503 errors retry with exponential backoff.
+   - Minimal local SQLite audit persistence in table `gateway_runs`.
+
+### Chosen Approach
+Adopt Option 3.
+
+### Rationale
+- Zero third-party dependencies maintains a lightweight, auditable, high-performance runtime.
+- Standard-library `urllib.request` provides full transparency over request payloads, HTTP headers, timeouts, and socket exceptions.
+- Structured output enforcement directly from Gemini eliminates parsing fragility and guarantees conformity to the `ExplanationResponse` Pydantic model.
+- 6-tuple consent token binding guarantees that neither the target packet, the provider, nor the model can be switched or tampered with after human approval.
+- Active rejection of on-disk API keys ensures credentials are never accidentally committed to version control.
+- Non-silent grounding enforcement guarantees that hallucinations are marked ungrounded and coerced to `UNKNOWN`.
+
+### Trade-offs & Consequences
+- Adhering strictly to the Gemini Interactions API requires custom JSON envelope parsing across potential response formats (`output`, `candidates`, or root payloads).
+- Standard-library HTTP requires explicit backoff retry loops and timeout classification rather than relying on high-level SDK helpers.
+
+### Date
+2026-10-03
+
+

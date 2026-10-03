@@ -246,11 +246,33 @@ def migration_v4(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_items_packet ON context_items(packet_id)")
 
 
+def migration_v5(conn: sqlite3.Connection) -> None:
+    """Version 5: AI Gateway audit table (gateway_runs)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS gateway_runs (
+            id TEXT PRIMARY KEY,
+            packet_id TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            tokens_prompt INTEGER NOT NULL,
+            tokens_candidate INTEGER NOT NULL,
+            latency_ms REAL NOT NULL,
+            claims_count INTEGER NOT NULL,
+            grounded_count INTEGER NOT NULL,
+            unknown_count INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_gateway_runs_packet ON gateway_runs(packet_id)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
     (3, "Development context: change_sets, file_changes, diff_hunks, evidence_records", migration_v3),
     (4, "Context engine: context_requests, context_packets, context_items", migration_v4),
+    (5, "AI Gateway: gateway_runs", migration_v5),
 ]
 
 

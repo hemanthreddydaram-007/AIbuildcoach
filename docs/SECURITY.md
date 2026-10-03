@@ -94,16 +94,34 @@ Before any context packet is assembled or cached for future external provider us
 - **Filesystem Boundary**: Context extraction is strictly bounded to the project workspace root; path traversal attempts are halted.
 - **Runtime Database Boundary**: Files in `.buildcoach/` (including `state.db`) are excluded from context collection.
 
-### 5.2 Explicit Data Transmission Policy (Future M5)
+### 5.2 Explicit User Consent & Cryptographic Token Binding (Milestone 5)
 - **Local-First Default**: By default, all project scanning, Git state parsing, AST mapping, and context packet generation remain 100% local on disk (`.buildcoach/state.db`).
-- **Explicit Consent**: Project data is transmitted to an external model provider **only** when the user explicitly triggers an AI action.
-- **Transparency**: The developer can inspect the exact `ContextPacket` (including items, relevance reasons, and redaction summary) prior to transmission.
+- **Explicit Consent**: Project data is transmitted to an external model provider **only** when an explicit, valid `ConsentToken` is supplied.
+- **Cryptographic 6-Tuple Binding**: A `ConsentToken` is cryptographically bound to:
+  1. `user_acknowledged`: Boolean flag indicating direct human approval.
+  2. `packet_id`: The exact context packet ID.
+  3. `packet_hash`: Deterministic SHA-256 digest of the complete canonical context packet.
+  4. `provider`: Authorized provider identifier (e.g. `gemini`).
+  5. `model`: Authorized model identifier (e.g. `gemini-3.8-flash`).
+  6. `expires_at`: ISO UTC expiration timestamp (default: 15 minutes).
+- **Tampering & Replay Prevention**: Any post-consent alteration to packet items, token estimate, or metadata invalidates the hash and halts execution before any external call.
+- **Transparency**: The developer can inspect the exact `TransmissionPreview` (including files included, token estimate, item count, and redaction summary) prior to consenting.
 
-### 5.3 Credential Handling
+### 5.3 BYOK Credential Handling & Zero On-Disk Storage (Milestone 5)
 - Raw AI API keys are **never stored in plaintext** in `.buildcoach/config.json` or committed to version control.
 - Supported storage mechanisms:
-  - Process environment variables (`GEMINI_API_KEY`, etc.)
-  - OS-native credential storage (Windows Credential Manager, macOS Keychain, Linux Secret Service).
+  - Process environment variables (`GEMINI_API_KEY`, `BUILDCOACH_GEMINI_API_KEY`).
+  - Direct ephemeral in-memory parameters.
+- **Active Disk Violation Rejection**: `CredentialStore` actively scans `.buildcoach/config.json` for suspicious key names (`api_key`, `gemini_key`, etc.) and immediately raises `SecurityConfigurationError`, refusing to execute until on-disk secrets are removed.
+- **Masking**: Keys are masked (`AIza...cdef` or `***`) across all diagnostic messages and logs.
+
+### 5.4 Zero-Trust Prompt Fencing & Anti-Injection
+- Project content and diffs are wrapped inside XML fences: `<untrusted_project_evidence>` and `<context_item id="..." source="..." ...>`.
+- Plain-string system instructions explicitly inform the model that all evidence is untrusted data and strictly forbid following instructions found inside user files or diffs.
+
+### 5.5 Test Suite Network Isolation
+- All unit and integration tests strictly mock external HTTP requests via `unittest.mock.patch('urllib.request.urlopen')`.
+- Zero live API calls and zero actual API keys are used during automated testing.
 
 ---
 

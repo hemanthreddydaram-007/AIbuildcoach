@@ -85,11 +85,15 @@ Every milestone must strictly execute the following engineering cycle before pro
 #### Milestone 5 — AI Gateway
 - **Goal**: Decoupled AI provider interface and resilient communication layer.
 - **Scope**:
-  - `AIProvider` abstract base class.
-  - Initial adapter implementation (e.g. Gemini Provider).
-  - Timeout, retry with exponential backoff, circuit breaking, and structured output parsing.
-  - Zero raw secrets in logs; fallback handling when AI is offline.
-- **Gate**: System fails gracefully on mock network/API errors without corrupting local state or crashing.
+  - `AIProviderAdapter` abstract base class.
+  - Concrete `GeminiInteractionsAdapter` for Gemini 3.8 Flash via standard-library `urllib.request` (zero SDK dependencies).
+  - Explicit user consent management (`ConsentManager`, `ConsentToken` with 6-tuple cryptographic binding).
+  - BYOK credential handling (`CredentialStore`) enforcing environment variables and rejecting sensitive keys in `config.json`.
+  - Zero-trust prompt fencing with anti-injection fences.
+  - Strict evidence validation (`EvidenceValidator`) enforcing canonical `ContextItem.item_id` references without silent inference coercion.
+  - Local audit persistence in SQLite table `gateway_runs`.
+  - 100% mocked offline tests (zero external network requests).
+- **Gate**: Validates consent, keys, request shape, timeout non-retry, 429/503 retry, and grounding metrics. [Status: COMPLETED - 110/110 tests passing]
 
 #### Milestone 6 — Workflow 1: Understand the Change
 - **Goal**: End-to-end implementation of "Understand the Change".

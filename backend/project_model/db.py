@@ -909,3 +909,62 @@ class Database:
         finally:
             conn.close()
 
+    def record_gateway_run(
+        self,
+        run_id: str,
+        packet_id: str,
+        provider: str,
+        model: str,
+        tokens_prompt: int,
+        tokens_candidate: int,
+        latency_ms: float,
+        claims_count: int,
+        grounded_count: int,
+        unknown_count: int,
+        created_at: Optional[str] = None,
+    ) -> None:
+        """Records an execution of the AI Gateway in the local audit table."""
+        from backend.domain.models import utc_now_iso
+
+        ts = created_at or utc_now_iso()
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO gateway_runs (
+                        id, packet_id, provider, model, tokens_prompt, tokens_candidate,
+                        latency_ms, claims_count, grounded_count, unknown_count, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        packet_id,
+                        provider,
+                        model,
+                        tokens_prompt,
+                        tokens_candidate,
+                        latency_ms,
+                        claims_count,
+                        grounded_count,
+                        unknown_count,
+                        ts,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_gateway_run_by_id(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a gateway run audit entry by ID."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM gateway_runs WHERE id = ?", (run_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return dict(row)
+        finally:
+            conn.close()
+
+

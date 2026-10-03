@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 4: Context Engine (Pipeline, Secret Redaction, Compression)**
+**Milestone 5: AI Gateway (Gemini 3.8 Flash, Consent, BYOK, Anti-Hallucination Grounding)**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -20,11 +20,13 @@ This document serves as the project's operational memory across development sess
   - M2: `ProjectGraph`, `GraphNode`, `GraphEdge`, `ProvenanceRecord`, `NodeType`, `EdgeType`.
   - M3: `ChangeSet`, `FileChange`, `DiffHunk`, `EvidenceRecord`, `ChangeType`.
   - M4: `ContextPurpose`, `ContextSourceType`, `ContextItem`, `ContextRequest`, `ContextPacket`.
+  - M5: `ClaimType`, `StructuredClaim`, `ExplanationResponse`, `ConsentToken`, `TransmissionPreview`, `RawInteractionResponse`, `ValidatedGatewayResult`.
 - Deterministic SQLite database (`.buildcoach/state.db`):
   - Explicit schema versioning and migration framework (`schema_migrations`, `projects`, `files`, `git_states`, `scan_runs`).
   - Migration v2: `graph_nodes` and `graph_edges` tables with cascading foreign keys and indexes.
   - Migration v3: `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` tables with cascading foreign keys and indexes.
   - Migration v4: `context_requests`, `context_packets`, and `context_items` tables with composite primary keys, foreign keys, and indexes.
+  - Migration v5: `gateway_runs` minimal local audit table tracking run ID, packet ID, provider, model, tokens, latency, claim counts, and timestamp.
   - Deterministic caching (`cache_key`) for ContextPackets based on project ID, changeset ID, graph node/edge signature, purpose, target files, and token budget.
 - Safe, read-only Git state detector (`detect_git_state`):
   - Inspects branch name, HEAD commit hash, dirty flag, untracked/modified/staged file counts.
@@ -62,70 +64,72 @@ This document serves as the project's operational memory across development sess
   - Deterministic secret detection and redaction (API keys, bearer tokens, passwords, private keys, .env credentials) with zero raw secret strings written to logs, context packets, or SQLite.
   - Compression and budgeting (engineering target 3,000–6,000 tokens, default 4,000 tokens) with whitespace normalization, deduplication, oversized file line-pruning, binary file omission, and explicit `truncation_status` tracking.
   - Deterministic ContextPacket SHA-256 IDs and cache keys.
+- AI Gateway (`AIGateway`, `backend.ai_gateway`):
+  - Abstract provider interface (`AIProviderAdapter`) decoupled from concrete transports.
+  - Google Gemini 3.8 Flash (`gemini-3.8-flash`) transport (`GeminiInteractionsAdapter`) using standard library `urllib.request` (zero third-party SDK dependencies).
+  - Gemini Interactions API request structure: `model="gemini-3.8-flash"`, plain string `system_instruction`, plain string `input`, `response_format`, `generation_config={"thinking_level": "low"}`, `store=False`.
+  - Zero retries on ambiguous POST timeouts; exponential backoff retry on transient HTTP 429/503.
+  - Explicit user consent management (`ConsentManager`) binding `ConsentToken` to the 6-tuple `(user_acknowledged, packet_id, packet_hash, provider, model, expires_at)`.
+  - BYOK credential handling (`CredentialStore`) enforcing environment variables and rejecting sensitive keys in `config.json`.
+  - Zero-trust prompt fencing wrapping evidence in `<untrusted_project_evidence>` with anti-injection instructions.
+  - Strict evidence grounding (`EvidenceValidator`): enforces canonical `ContextItem.item_id` references; unsupported observations are coerced to `UNKNOWN` (never silently converted to `INFERENCE`).
+  - Local audit logging in SQLite table `gateway_runs`.
 
 ---
 
 ## What Does Not Work (Intentional Scope Boundaries)
-- AI Gateway provider integrations (scheduled for Milestone 5).
-- User-facing workflows (scheduled for Milestones 6–8).
+- Viva Question Generator / Comprehension Verification (scheduled for Milestones 6–8).
+- User-facing UI and VS Code extension (scheduled for Milestones 9–10).
 - No code generation, automated refactoring, or autonomous shell execution exists (prohibited across all milestones).
 
 ---
 
 ## What Was Tested
-- **Test Suite**: 85 automated tests passing in `tests/`:
-  - `test_context_engine.py` (30 tests):
-    1. Empty project context
-    2. Clean working tree
-    3. Project with current changes
-    4. Changed file ranking (100.0 / 95.0)
-    5. Direct dependency ranking (70.0)
-    6. Direct dependent ranking (60.0)
-    7. Unrelated file exclusion
-    8. Relevant test selection (50.0)
-    9. Evidence selection (30.0)
-    10. Duplicate context removal
-    11. Deterministic ranking
-    12. Deterministic ContextPacket ID
-    13. Deterministic item ordering
-    14. Secret detection
-    15. Secret redaction
-    16. Multiple secrets in one file
-    17. Secret not persisted in memory or SQLite
-    18. Provenance preservation
-    19. Context budget within limit
-    20. Context truncation behavior
-    21. Critical-item preservation during truncation
-    22. Compression behavior
-    23. Binary-file handling
-    24. Large-file handling
-    25. Malformed input handling
-    26. Missing evidence handling
-    27. Missing Project Graph handling
-    28. Cache invalidation after ChangeSet changes
-    29. Repeated ContextPacket generation
-    30. End-to-end pipeline fixture (`auth.py` -> `middleware.py` -> `auth_test.py` -> `unrelated.py`)
+- **Test Suite**: 110 automated tests passing in `tests/`:
+  - `test_ai_gateway.py` (23 tests):
+    1. Deterministic packet hash computation
+    2. Packet hash alteration detection upon tampering
+    3. Human-inspectable transmission preview generation
+    4. Consent granting and successful validation
+    5. Consent rejection (unacknowledged, packet ID mismatch, hash mismatch, provider mismatch, model mismatch, expiration)
+    6. Credential store explicit parameter resolution
+    7. Credential store environment variable resolution
+    8. Credential store missing key rejection
+    9. Credential store detection and active rejection of secrets in `config.json`
+    10. Credential key masking for diagnostics
+    11. Evidence validator grounding of valid claim references
+    12. Evidence validator coercion of unknown references from OBSERVATION to UNKNOWN
+    13. Evidence validator detection of uninspected file paths
+    14. Evidence validator handling of claims with zero citations
+    15. Gemini adapter request payload shape verification (Interactions API format)
+    16. Gemini adapter successful mock HTTP interaction and usage parsing
+    17. Ambiguous POST network timeout non-retry guarantee
+    18. Transient HTTP 429 exponential backoff retry
+    19. Fatal HTTP 401 unauthorized non-retry
+    20. Full end-to-end AIGateway execution pipeline and SQLite audit logging
+    21. Consent violation halting execution before provider call
+    22. Missing credentials halting execution before provider call
+    23. Malformed model response error handling
+  - `test_context_engine.py` (32 tests): Pipeline, scoring, secret detection, redaction, budget truncation, compression, caching.
   - `test_context.py` (18 tests): ChangeSets, FileChanges, DiffHunks, EvidenceRecords, Git status/diff parsing, determinism, syncing.
-  - `test_db.py` (5 tests): Migrations v1–v3, CRUD, syncing, large file sets.
+  - `test_db.py` (5 tests): Migrations v1–v5, CRUD, syncing, large file sets.
   - `test_git_detector.py` (3 tests): Non-git, worktree, empty and dirty repos.
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 85 passed in 15.85s.
+- **Live Local Test**: 110 passed in 28.03s.
 
 ---
 
 ## Known Limitations
 - **Secret Detection Scope**: Detection relies on deterministic regular expressions targeting high-entropy keys, bearer tokens, passwords, private keys, and environment variables. It does not claim 100% discovery of novel, custom-encoded, or obfuscated secrets.
 - **Language Relationship Extraction Scope**: Import extraction covers Python, JavaScript, and TypeScript without full compiler infrastructure. Other languages (`.go`, `.rs`, `.sql`, `.md`, etc.) are captured as `FILE` nodes with `extraction_supported=False` and zero hallucinated edges.
-- **Dynamic Imports with Variable Expressions**: Statically unknown expressions (e.g. `import(variable)`) are intentionally omitted from static relationship extraction.
 - **Token Estimation Heuristic**: Character-based heuristic (`max(1, len(text) // 4)`) provides an engineering estimate, not exact tokenizer parity for every third-party LLM.
 
 ---
 
 ## Next Milestone
-**Milestone 5: AI Gateway**
-- Decoupled AI provider interface (`AIProvider`).
-- Initial provider adapter (e.g. Gemini Provider).
-- Timeout, retry with exponential backoff, circuit breaking, and structured output parsing.
-- Safe handling of redacted context packets and zero raw secret exposure in logs.
+**Milestone 6: Change Summarizer & Explanation Engine**
+- Synthesize change sets and context packets into layered, human-understandable architectural explanations.
+- Grounded claim generation backed by verifiable project evidence.
+
