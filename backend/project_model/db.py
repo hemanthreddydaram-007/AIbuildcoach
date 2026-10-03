@@ -21,6 +21,11 @@ from backend.domain.models import (
     DiffHunk,
     EvidenceRecord,
     ChangeType,
+    ContextPacket,
+    ContextItem,
+    ContextRequest,
+    ContextPurpose,
+    ContextSourceType,
 )
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
@@ -724,3 +729,183 @@ class Database:
             ]
         finally:
             conn.close()
+
+    def save_context_packet(
+        self,
+        packet: ContextPacket,
+        request: Optional[ContextRequest] = None,
+        cache_key: Optional[str] = None,
+    ) -> None:
+        """Persists a context packet, its items, and optional request metadata."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                request_id = None
+                if request is not None:
+                    request_id = f"req_{packet.id}"
+                    cs_id = request.change_set.id if request.change_set else None
+                    conn.execute(
+                        """
+                        INSERT INTO context_requests (id, project_id, purpose, change_set_id, target_files, budget_tokens, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(id) DO UPDATE SET
+                            purpose = excluded.purpose,
+                            target_files = excluded.target_files,
+                            budget_tokens = excluded.budget_tokens
+                        """,
+                        (
+                            request_id,
+                            request.project_id,
+                            request.purpose,
+                            cs_id,
+                            json.dumps(request.target_files),
+                            request.budget_tokens,
+                            packet.generated_at,
+                        ),
+                    )
+
+                conn.execute(
+                    """
+                    INSERT INTO context_packets (
+                        id, project_id, request_id, purpose, packet_version, token_estimate,
+                        truncation_status, redaction_summary, evidence_refs, cache_key, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                        token_estimate = excluded.token_estimate,
+                        truncation_status = excluded.truncation_status,
+                        redaction_summary = excluded.redaction_summary,
+                        evidence_refs = excluded.evidence_refs,
+                        cache_key = excluded.cache_key
+                    """,
+                    (
+                        packet.id,
+                        packet.project_id,
+                        request_id,
+                        packet.purpose,
+                        packet.packet_version,
+                        packet.token_estimate,
+                        packet.truncation_status,
+                        json.dumps(packet.redaction_summary),
+                        json.dumps(packet.evidence_refs),
+                        cache_key,
+                        packet.generated_at,
+                    ),
+                )
+
+                # Overwrite items atomically for this packet
+                conn.execute("DELETE FROM context_items WHERE packet_id = ?", (packet.id,))
+                for idx, item in enumerate(packet.items):
+                    conn.execute(
+                        """
+                        INSERT INTO context_items (
+                            id, packet_id, source_type, source_reference, file_path,
+                            line_start, line_end, relevance_reason, relevance_score,
+                            redacted, evidence_refs, content, item_order
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(packet_id, id) DO UPDATE SET
+                            source_type = excluded.source_type,
+                            source_reference = excluded.source_reference,
+                            file_path = excluded.file_path,
+                            line_start = excluded.line_start,
+                            line_end = excluded.line_end,
+                            relevance_reason = excluded.relevance_reason,
+                            relevance_score = excluded.relevance_score,
+                            redacted = excluded.redacted,
+                            evidence_refs = excluded.evidence_refs,
+                            content = excluded.content,
+                            item_order = excluded.item_order
+                        """,
+                        (
+                            item.item_id,
+                            packet.id,
+                            item.source_type,
+                            item.source_reference,
+                            item.file_path,
+                            item.line_start,
+                            item.line_end,
+                            item.relevance_reason,
+                            item.relevance_score,
+                            1 if item.redacted else 0,
+                            json.dumps(item.evidence_refs),
+                            item.content,
+                            idx,
+                        ),
+                    )
+        finally:
+            conn.close()
+
+    def get_context_packet_by_id(self, packet_id: str) -> Optional[ContextPacket]:
+        """Retrieves a persisted context packet by its identifier."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, project_id, request_id, purpose, packet_version, token_estimate,
+                       truncation_status, redaction_summary, evidence_refs, cache_key, created_at
+                FROM context_packets WHERE id = ?
+                """,
+                (packet_id,),
+            )
+            p_row = cursor.fetchone()
+            if not p_row:
+                return None
+
+            cursor.execute(
+                """
+                SELECT id, packet_id, source_type, source_reference, file_path, line_start,
+                       line_end, relevance_reason, relevance_score, redacted, evidence_refs, content, item_order
+                FROM context_items WHERE packet_id = ? ORDER BY item_order ASC
+                """,
+                (packet_id,),
+            )
+            i_rows = cursor.fetchall()
+
+            items = [
+                ContextItem(
+                    item_id=ir["id"],
+                    source_type=ir["source_type"],
+                    source_reference=ir["source_reference"],
+                    file_path=ir["file_path"],
+                    line_start=ir["line_start"],
+                    line_end=ir["line_end"],
+                    evidence_refs=json.loads(ir["evidence_refs"]) if ir["evidence_refs"] else [],
+                    relevance_reason=ir["relevance_reason"],
+                    relevance_score=float(ir["relevance_score"]),
+                    redacted=bool(ir["redacted"]),
+                    content=ir["content"],
+                )
+                for ir in i_rows
+            ]
+
+            return ContextPacket(
+                id=p_row["id"],
+                project_id=p_row["project_id"],
+                purpose=p_row["purpose"],
+                generated_at=p_row["created_at"],
+                packet_version=p_row["packet_version"],
+                items=items,
+                evidence_refs=json.loads(p_row["evidence_refs"]) if p_row["evidence_refs"] else [],
+                redaction_summary=json.loads(p_row["redaction_summary"]) if p_row["redaction_summary"] else {},
+                token_estimate=p_row["token_estimate"],
+                truncation_status=p_row["truncation_status"],
+            )
+        finally:
+            conn.close()
+
+    def get_cached_context_packet(self, cache_key: str) -> Optional[ContextPacket]:
+        """Retrieves a cached context packet matching the exact deterministic cache key."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT id FROM context_packets WHERE cache_key = ? ORDER BY created_at DESC LIMIT 1",
+                (cache_key,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self.get_context_packet_by_id(row["id"])
+        finally:
+            conn.close()
+

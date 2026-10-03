@@ -212,3 +212,58 @@ class ScanResult(BaseModel):
     scanned_at: str = Field(default_factory=utc_now_iso)
     duration_ms: float = 0.0
     errors: List[str] = Field(default_factory=list)
+
+
+class ContextPurpose(str):
+    CHANGE_EXPLANATION = "CHANGE_EXPLANATION"
+    FILE_UNDERSTANDING = "FILE_UNDERSTANDING"
+    PROJECT_OVERVIEW = "PROJECT_OVERVIEW"
+    DEPENDENCY_CONTEXT = "DEPENDENCY_CONTEXT"
+
+
+class ContextSourceType(str):
+    PROJECT_GRAPH = "PROJECT_GRAPH"
+    CHANGESET = "CHANGESET"
+    FILE = "FILE"
+    DIFF = "DIFF"
+    EVIDENCE = "EVIDENCE"
+    TEST = "TEST"
+    GIT = "GIT"
+
+
+class ContextItem(BaseModel):
+    item_id: str
+    source_type: str
+    source_reference: str
+    file_path: Optional[str] = None
+    line_start: Optional[int] = None
+    line_end: Optional[int] = None
+    evidence_refs: List[str] = Field(default_factory=list)
+    relevance_reason: str
+    relevance_score: float = 0.0
+    redacted: bool = False
+    content: str
+
+
+class ContextRequest(BaseModel):
+    project_id: str
+    change_set: Optional[ChangeSet] = None
+    graph: Optional[ProjectGraph] = None
+    purpose: str = ContextPurpose.CHANGE_EXPLANATION
+    target_files: List[str] = Field(default_factory=list)
+    target_symbols: List[str] = Field(default_factory=list)
+    budget_tokens: int = 4000
+
+
+class ContextPacket(BaseModel):
+    id: str
+    project_id: str
+    purpose: str
+    generated_at: str = Field(default_factory=utc_now_iso)
+    packet_version: str = "1.0.0"
+    items: List[ContextItem] = Field(default_factory=list)
+    evidence_refs: List[str] = Field(default_factory=list)
+    redaction_summary: Dict[str, Any] = Field(default_factory=dict)
+    token_estimate: int = 0
+    truncation_status: str = "NONE"  # "NONE", "TRUNCATED"
+

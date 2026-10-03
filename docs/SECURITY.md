@@ -50,38 +50,56 @@ If command execution is introduced in later phases, all commands must be categor
 
 ---
 
-## 4. Secret Detection & Redaction Engine
+## 4. Secret Detection & Redaction Engine (Milestone 4 Implementation)
 
-Before any context packet leaves the local environment for an external AI provider, it must pass through the deterministic redaction pipeline:
+Before any context packet is assembled or cached for future external provider use, it must pass through the deterministic redaction pipeline:
 
-### Detection Rules:
-- **High-Entropy Tokens**: Shannon entropy analysis on alphanumeric string literals.
-- **Pattern Matchers**:
-  - AWS access keys (`AKIA[0-9A-Z]{16}`)
-  - GitHub Personal Access Tokens (`ghp_[0-9a-zA-Z]{36}`)
-  - OpenAI / Anthropic / Gemini API keys (`sk-[0-9a-zA-Z]{20,}`, `AIzaSy[0-9a-zA-Z-_]{33}`)
-  - Private Keys (`-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----`)
-  - Connection Strings (`postgres://`, `mongodb://`, `mysql://`)
-- **Strict File Type Exclusions**: Files matching `.env*`, `*.pem`, `*.key`, `*.cert`, `id_rsa` are strictly blocked from external transmission regardless of content.
+### 4.1 Detection Rules & Precompiled Patterns:
+1. **Private Keys (multiline)**:
+   - Matches `-----BEGIN ... PRIVATE KEY-----` through `-----END ... PRIVATE KEY-----`.
+   - Category: `PRIVATE_KEY`.
+2. **Bearer & Authorization Tokens**:
+   - Matches `Bearer <token>` in HTTP headers or source code.
+   - Category: `BEARER_TOKEN`.
+3. **High-Entropy / Formatted API Keys**:
+   - OpenAI / Anthropic / Generic `sk-...`
+   - Google `AIza...`
+   - AWS access keys `AKIA...`, `ASIA...`
+   - GitHub PATs `ghp_...`, `gho_...`, `github_pat_...`
+   - Slack tokens `xoxb-...`, `xoxp-...`
+   - Category: `API_KEY`.
+4. **Password & Credential Assignments**:
+   - Identifiers `password`, `passwd`, `pwd`, `pass`, `api_key`, `secret_key`, `auth_token`, `access_token` assigned in code or config.
+   - Category: `PASSWORD` / `API_KEY`.
+5. **.env Environment Variable Assignments**:
+   - Variables ending in `KEY`, `SECRET`, `PASSWORD`, `PASSWD`, `PASS`, `TOKEN`, `CREDENTIAL`, or `PRIVATE`.
+   - Category: `ENV_CREDENTIAL`.
 
-### Redaction Replacement:
-Detected secrets are sanitized with explicit placeholder markers (e.g. `[REDACTED_API_KEY]`, `[REDACTED_PRIVATE_KEY]`).
+### 4.2 Redaction Behavior & Privacy Guarantees:
+- **Sanitization Placeholder**: Replaces sensitive values with explicit deterministic markers (`[REDACTED]`, `[REDACTED_PRIVATE_KEY]`) while preserving syntax boundaries and code structures.
+- **Zero Raw Secret Persistence**: Discovered raw secret strings are **never logged**, **never included in `redaction_summary`**, **never persisted to SQLite**, and **never present in the `ContextPacket`**.
+- **Detection Summary**: The packet metadata tracks only aggregate counts and category counts (e.g. `{"total_secrets_detected": 3, "categories": {"API_KEY": 2, "PASSWORD": 1}}`).
+- **Pipeline Precedence**: Secret detection and redaction occur *before* compression and budgeting.
 
-> **CRITICAL DISCLAIMER**: The secret detector provides defense-in-depth but does not guarantee 100% discovery of novel or obfuscated secrets. The user is always shown which files are included in the transmission bundle.
+> **CRITICAL DISCLAIMER & LIMITATIONS**:
+> This engine provides deterministic regex pattern matching for common credential formats. It is a defense-in-depth detection layer, NOT an infallible scanner. It does not guarantee detection of novel, custom-encoded, or obfuscated secrets. Repository authors remain responsible for not committing credentials to source code.
 
 ---
 
-## 5. Privacy & User Consent Model
+## 5. Privacy, No-AI Boundary & User Consent Model
 
-### Explicit Data Transmission
-- **Local-First Default**: By default, all project scanning, Git state parsing, AST mapping, and knowledge tracking remain 100% local on disk (`.buildcoach/`).
-- **Explicit Consent**: Project data is transmitted to an external model provider **only** when the user explicitly triggers an AI action (e.g., clicking *"Understand what changed"* or *"Submit Viva Answer"*).
-- **Transparency**: The UI must clearly indicate:
-  1. What provider is receiving the request.
-  2. The compressed context size (token count / file list).
-  3. Confirmation that all detected secrets have been redacted.
+### 5.1 No-AI & No-Execution Boundary (Milestone 4)
+- **Zero AI Calls**: M4 contains no LLM SDKs, no external HTTP requests to OpenAI/Gemini/Anthropic, no prompt templates, and no model inference.
+- **Zero Code Execution**: M4 treats all project content as passive data. It never imports project modules, evaluates source code, or executes shell commands based on file contents.
+- **Filesystem Boundary**: Context extraction is strictly bounded to the project workspace root; path traversal attempts are halted.
+- **Runtime Database Boundary**: Files in `.buildcoach/` (including `state.db`) are excluded from context collection.
 
-### Credential Handling
+### 5.2 Explicit Data Transmission Policy (Future M5)
+- **Local-First Default**: By default, all project scanning, Git state parsing, AST mapping, and context packet generation remain 100% local on disk (`.buildcoach/state.db`).
+- **Explicit Consent**: Project data is transmitted to an external model provider **only** when the user explicitly triggers an AI action.
+- **Transparency**: The developer can inspect the exact `ContextPacket` (including items, relevance reasons, and redaction summary) prior to transmission.
+
+### 5.3 Credential Handling
 - Raw AI API keys are **never stored in plaintext** in `.buildcoach/config.json` or committed to version control.
 - Supported storage mechanisms:
   - Process environment variables (`GEMINI_API_KEY`, etc.)

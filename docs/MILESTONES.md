@@ -80,7 +80,7 @@ Every milestone must strictly execute the following engineering cycle before pro
   - Normalization, relevance filtering, and boilerplate stripping.
   - Deterministic secret detection and redaction engine.
   - Context compression budgeting (targeting 3,000–6,000 tokens).
-- **Gate**: Synthetic projects containing API keys, private keys, and `.env` files verify 100% redaction of test fixtures.
+- **Gate**: Synthetic projects containing API keys, private keys, and `.env` files verify 100% redaction of test fixtures. [Status: COMPLETED - 85 tests passing]
 
 #### Milestone 5 — AI Gateway
 - **Goal**: Decoupled AI provider interface and resilient communication layer.

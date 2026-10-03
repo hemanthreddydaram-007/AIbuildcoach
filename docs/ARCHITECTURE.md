@@ -117,31 +117,90 @@ When constructing context packets for the AI Gateway, context sources are priori
 
 ---
 
-## 4. Context Pipeline
+## 4. Context Pipeline & Context Engine Specification (Milestone 4)
 
-All project data routed to an external AI provider must traverse this deterministic pipeline:
+The Context Engine sits between the deterministic project/evidence layers (M1–M3) and the future AI Gateway (M5). It transforms raw project information into a structured, safe, provenance-preserving `ContextPacket`.
+
+Context selection is 100% deterministic and evidence-driven:
+- No LLMs are called to decide what context is relevant.
+- No model-generated summaries are used for compression.
+- No developer intent or architectural rationale is invented.
+
+### 4.1 Core Pipeline Stages
 
 ```
-[ RAW PROJECT DATA ]
-        ↓
-[ NORMALIZE ]              Strip non-printable characters, unify line endings (LF), resolve canonical paths
-        ↓
-[ RELEVANCE FILTER ]       Filter out lockfiles, build artifacts, test binaries, and unmodified files
-        ↓
-[ SECRET DETECTION ]       Scan for high-entropy tokens, private keys, API keys, password literals
-        ↓
-[ REDACTION ]              Replace detected secrets with [REDACTED_API_KEY] or deterministic tokens
-        ↓
-[ CONTEXT COMPRESSION ]    Trim boilerplate; target budget of 3,000–6,000 tokens for rapid evaluation
-        ↓
-[ AI GATEWAY ]             Enforce timeout, retry policy, error fallbacks, and model abstractions
-        ↓
-[ MODEL RESPONSE ]         Receive raw response
-        ↓
-[ VALIDATION ]             Validate structured JSON schema, enforce claim classifications, reject hallucinations
-        ↓
-[ USER INTERFACE ]         Render verified, evidence-grounded insights to the developer
+RAW DATA
+    ↓
+NORMALIZE
+    ↓
+RELEVANCE FILTER
+    ↓
+SECRET DETECTION
+    ↓
+REDACTION
+    ↓
+COMPRESS
+    ↓
+CONTEXT PACKET
 ```
+
+1. **RAW DATA**: Ingests `project_id`, `ChangeSet`, `ProjectGraph`, explicit `target_files`/`target_symbols`, and `budget_tokens`.
+2. **NORMALIZE**: Canonicalizes paths to forward slashes, trims whitespace, standardizes line ranges `(start, end)`, and validates inputs.
+3. **RELEVANCE FILTER**: Deterministically ranks candidates according to explicit scoring tiers and discards candidates with score <= 0.0 (unrelated files).
+4. **SECRET DETECTION**: Evaluates candidate contents with precompiled regex patterns to detect API keys, bearer tokens, passwords, private keys, and `.env` credentials before any compression.
+5. **REDACTION**: Replaces sensitive values with deterministic placeholders (`[REDACTED]`, `[REDACTED_PRIVATE_KEY]`), records counts and categories in `redaction_summary`, and never stores raw secret values in memory, logs, or SQLite.
+6. **COMPRESS**: Deduplicates identical items, normalizes whitespace (stripping trailing spaces, collapsing consecutive blank lines), prunes lines in oversized files, and applies token budgeting.
+7. **CONTEXT PACKET**: Assembles the sorted `ContextItem` list, computes a deterministic SHA-256 `id`, records `token_estimate` and `truncation_status`, and optionally persists and caches in SQLite.
+
+### 4.2 Deterministic Relevance Model & Scoring Tiers
+
+Every item evaluated by the relevance filter receives a transparent, documented score:
+
+| Candidate Category | Relevance Score | Description / Criteria |
+|---|---|---|
+| Directly Changed File | **100.0** | Files in `ChangeSet.file_changes` (`ADDED`, `MODIFIED`, `DELETED`, `RENAMED`) |
+| Changed Diff Hunk | **95.0** | Individual diff hunks linked to changed files with exact line ranges |
+| Explicit Target File | **90.0** | Files specifically requested via `ContextRequest.target_files` |
+| Direct Dependency | **70.0** | Files directly imported by changed files (`ProjectGraph` out-edges `IMPORTS`) |
+| Direct Dependent | **60.0** | Files directly importing changed files (`ProjectGraph` in-edges `IMPORTS`) |
+| Related Test File | **50.0** | Test files matching changed stems (`test_<stem>`, `<stem>_test`, etc.) or importing changed files |
+| Project Configuration | **40.0** | Known build/config files (`pyproject.toml`, `package.json`, `tsconfig.json`, etc.) |
+| Change Evidence | **30.0** | Deterministic `EvidenceRecord`s (`GIT_STATUS`, `GIT_DIFF`, `WORKING_TREE`) |
+| Supporting Graph Node | **20.0** | Parent directories and related module nodes |
+| Unrelated Project File | **0.0** | Files with no direct connection to changed files (**Filtered Out**) |
+
+### 4.3 Deterministic Item Ordering
+
+Context items are ordered deterministically using the following canonical order rules:
+1. Current change summary (`source_type = CHANGESET`, summary)
+2. Changed files (`source_type = CHANGESET` or `FILE`)
+3. Changed diff hunks (`source_type = DIFF`)
+4. Direct dependencies/dependents (`source_type = PROJECT_GRAPH`)
+5. Relevant tests (`source_type = TEST`)
+6. Relevant evidence (`source_type = EVIDENCE` or `GIT`)
+7. Explicitly requested context (`source_type = FILE` where reason contains "requested")
+8. Lower-priority supporting context
+
+Tie-breaking order key: `(source_order_rank, -relevance_score, file_path, line_start, item_id)`.
+
+### 4.4 Size Budgeting & Truncation Rules
+
+- **Engineering Target**: 3,000–6,000 tokens (default: 4,000 tokens).
+- **Token Estimation**: Heuristic estimate using `max(1, len(text) // 4)` (approx 4 chars per token).
+- **Budget Rules**:
+  1. Critical items (relevance score >= 90.0) are preserved.
+  2. Lower-relevance items are dropped if adding them exceeds `budget_tokens`.
+  3. Oversized files with > 300 lines retain the first 150 lines and last 50 lines with an explicit pruning notice.
+  4. Binary files are never included as raw bytes; `[Binary file content omitted: <size> bytes]` is included.
+  5. The packet explicitly records `truncation_status` as `"NONE"` or `"TRUNCATED"`.
+
+### 4.5 Domain Entities & SQLite Schema (`migration_v4`)
+
+- **`ContextItem`**: `item_id`, `source_type`, `source_reference`, `file_path`, `line_start`, `line_end`, `evidence_refs`, `relevance_reason`, `relevance_score`, `redacted`, `content`.
+- **`ContextPacket`**: `id`, `project_id`, `purpose`, `generated_at`, `packet_version`, `items`, `evidence_refs`, `redaction_summary`, `token_estimate`, `truncation_status`.
+- **`ContextRequest`**: `project_id`, `change_set`, `graph`, `purpose`, `target_files`, `target_symbols`, `budget_tokens`.
+- **SQLite Tables**: `context_requests`, `context_packets`, `context_items` in `.buildcoach/state.db` with cascading foreign keys and deterministic caching.
+
 
 ---
 

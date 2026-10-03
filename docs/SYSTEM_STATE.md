@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 3: Development Context (Change Evidence Layer)**
+**Milestone 4: Context Engine (Pipeline, Secret Redaction, Compression)**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -19,11 +19,13 @@ This document serves as the project's operational memory across development sess
   - M1: `Project`, `ProjectFile`, `GitState`, `SchemaVersion`, `ProjectSummary`, `ScanResult`.
   - M2: `ProjectGraph`, `GraphNode`, `GraphEdge`, `ProvenanceRecord`, `NodeType`, `EdgeType`.
   - M3: `ChangeSet`, `FileChange`, `DiffHunk`, `EvidenceRecord`, `ChangeType`.
+  - M4: `ContextPurpose`, `ContextSourceType`, `ContextItem`, `ContextRequest`, `ContextPacket`.
 - Deterministic SQLite database (`.buildcoach/state.db`):
   - Explicit schema versioning and migration framework (`schema_migrations`, `projects`, `files`, `git_states`, `scan_runs`).
   - Migration v2: `graph_nodes` and `graph_edges` tables with cascading foreign keys and indexes.
   - Migration v3: `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` tables with cascading foreign keys and indexes.
-  - CRUD operations for projects, file syncing, Git states, scan runs, project graphs, and development context change sets.
+  - Migration v4: `context_requests`, `context_packets`, and `context_items` tables with composite primary keys, foreign keys, and indexes.
+  - Deterministic caching (`cache_key`) for ContextPackets based on project ID, changeset ID, graph node/edge signature, purpose, target files, and token budget.
 - Safe, read-only Git state detector (`detect_git_state`):
   - Inspects branch name, HEAD commit hash, dirty flag, untracked/modified/staged file counts.
   - Safe fallback for non-git directories, empty repositories, and Git worktree file pointers.
@@ -53,11 +55,17 @@ This document serves as the project's operational memory across development sess
   - Binary file modification detection without reading raw binary payloads into memory.
   - Strictly factual EvidenceRecords (zero inference; zero claims of user intent).
   - 100% deterministic SHA-256 IDs for ChangeSets, FileChanges, DiffHunks, and EvidenceRecords.
+- Context Engine (`ContextEngine`, `backend.context_engine`):
+  - Deterministic 7-stage pipeline: `RAW DATA -> NORMALIZE -> RELEVANCE FILTER -> SECRET DETECTION -> REDACTION -> COMPRESS -> CONTEXT PACKET`.
+  - Documented scoring tiers (100.0 directly changed files, 95.0 diff hunks, 90.0 explicit targets, 70.0 dependencies, 60.0 dependents, 50.0 related tests, 40.0 configs, 30.0 change evidence, 0.0 unrelated files filtered out).
+  - Canonical item ordering rules: changeset summary -> changed files -> changed hunks -> dependencies/dependents -> tests -> evidence -> explicit targets -> supporting context.
+  - Deterministic secret detection and redaction (API keys, bearer tokens, passwords, private keys, .env credentials) with zero raw secret strings written to logs, context packets, or SQLite.
+  - Compression and budgeting (engineering target 3,000–6,000 tokens, default 4,000 tokens) with whitespace normalization, deduplication, oversized file line-pruning, binary file omission, and explicit `truncation_status` tracking.
+  - Deterministic ContextPacket SHA-256 IDs and cache keys.
 
 ---
 
 ## What Does Not Work (Intentional Scope Boundaries)
-- Context compression and secret redaction engine (scheduled for Milestone 4).
 - AI Gateway provider integrations (scheduled for Milestone 5).
 - User-facing workflows (scheduled for Milestones 6–8).
 - No code generation, automated refactoring, or autonomous shell execution exists (prohibited across all milestones).
@@ -65,27 +73,59 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Was Tested
-- **Test Suite**: 55 automated tests passing in `tests/`:
-  - `test_context.py` (18 tests): Clean working tree, unstaged modified files, untracked/staged added files, deleted files, renamed files, multiple changed files, unstaged diff details, staged diff details, multiple non-contiguous hunks, binary files, empty diff, missing git repo, git command failure, deterministic ChangeSet IDs, deterministic Evidence IDs, repeated context collection & persistence, synchronization after file reverted, scanner integration with M3 change set.
-  - `test_db.py` (5 tests): Schema migrations v1, v2, v3, project/file CRUD & sync, git state recording, large file-set synchronization (2,500+ records) with batched parameterized deletion.
-  - `test_git_detector.py` (3 tests): Non-git directory handling, empty repository, untracked files, clean committed repository, git worktree `.git` file pointer support.
-  - `test_gitignore.py` (3 tests): Default exclusions, custom `.gitignore` with wildcards, negations, directory-only rules, root-anchored leading-slash rules, and out-of-bounds rejection.
-  - `test_graph.py` (14 tests): Project, Directory, File, Module nodes, CONTAINS relationships, Python AST imports, JS/TS single-line imports, TS type imports, multiline JS/TS import extraction with safe statement accumulation, unsupported languages, provenance, stable identities, repeated build idempotence, synchronization lifecycle, malformed files, binary files, path security, empty projects, mixed-language projects.
-  - `test_scanner.py` (12 tests): Root marker detection, empty project scan, nested projects, ignored directories, large file detection (>1MB), binary file detection, repeated scan idempotence, path traversal boundary enforcement, permission error handling, non-UTF-8 byte handling, inaccessible directory traversal.
-- **Live Local Test**: 55 passed in 22.66s.
+- **Test Suite**: 85 automated tests passing in `tests/`:
+  - `test_context_engine.py` (30 tests):
+    1. Empty project context
+    2. Clean working tree
+    3. Project with current changes
+    4. Changed file ranking (100.0 / 95.0)
+    5. Direct dependency ranking (70.0)
+    6. Direct dependent ranking (60.0)
+    7. Unrelated file exclusion
+    8. Relevant test selection (50.0)
+    9. Evidence selection (30.0)
+    10. Duplicate context removal
+    11. Deterministic ranking
+    12. Deterministic ContextPacket ID
+    13. Deterministic item ordering
+    14. Secret detection
+    15. Secret redaction
+    16. Multiple secrets in one file
+    17. Secret not persisted in memory or SQLite
+    18. Provenance preservation
+    19. Context budget within limit
+    20. Context truncation behavior
+    21. Critical-item preservation during truncation
+    22. Compression behavior
+    23. Binary-file handling
+    24. Large-file handling
+    25. Malformed input handling
+    26. Missing evidence handling
+    27. Missing Project Graph handling
+    28. Cache invalidation after ChangeSet changes
+    29. Repeated ContextPacket generation
+    30. End-to-end pipeline fixture (`auth.py` -> `middleware.py` -> `auth_test.py` -> `unrelated.py`)
+  - `test_context.py` (18 tests): ChangeSets, FileChanges, DiffHunks, EvidenceRecords, Git status/diff parsing, determinism, syncing.
+  - `test_db.py` (5 tests): Migrations v1–v3, CRUD, syncing, large file sets.
+  - `test_git_detector.py` (3 tests): Non-git, worktree, empty and dirty repos.
+  - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
+  - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
+  - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
+- **Live Local Test**: 85 passed in 15.85s.
 
 ---
 
 ## Known Limitations
+- **Secret Detection Scope**: Detection relies on deterministic regular expressions targeting high-entropy keys, bearer tokens, passwords, private keys, and environment variables. It does not claim 100% discovery of novel, custom-encoded, or obfuscated secrets.
 - **Language Relationship Extraction Scope**: Import extraction covers Python, JavaScript, and TypeScript without full compiler infrastructure. Other languages (`.go`, `.rs`, `.sql`, `.md`, etc.) are captured as `FILE` nodes with `extraction_supported=False` and zero hallucinated edges.
 - **Dynamic Imports with Variable Expressions**: Statically unknown expressions (e.g. `import(variable)`) are intentionally omitted from static relationship extraction.
-- **Subfolder-level `.gitignore` files**: `IgnoreFilter` loads root `.gitignore` and default exclusions.
-- **Repository Scale**: Very large codebases (e.g. 100,000+ files) will benefit from shallow scanning or subfolder scoping. Default exclusions eliminate `node_modules`, `.git`, `venv`, etc. Deletions in SQLite are batched in chunks of 500 to protect against variable limits.
+- **Token Estimation Heuristic**: Character-based heuristic (`max(1, len(text) // 4)`) provides an engineering estimate, not exact tokenizer parity for every third-party LLM.
 
 ---
 
 ## Next Milestone
-**Milestone 4: Context Engine (Pipeline, Secret Redaction, Compression)**
-- Implement deterministic context normalization and boilerplate filtering.
-- Deterministic secret detection and redaction engine.
-- Context compression budgeting (targeting 3,000–6,000 tokens).
+**Milestone 5: AI Gateway**
+- Decoupled AI provider interface (`AIProvider`).
+- Initial provider adapter (e.g. Gemini Provider).
+- Timeout, retry with exponential backoff, circuit breaking, and structured output parsing.
+- Safe handling of redacted context packets and zero raw secret exposure in logs.

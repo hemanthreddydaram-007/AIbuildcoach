@@ -175,3 +175,39 @@ Adopt the deterministic, passive static Project Graph. Nodes (`PROJECT`, `DIRECT
 
 ### Date
 2026-10-02
+
+---
+
+## ADR-0007: Deterministic Context Engine Pipeline & Pre-Gateway Redaction
+
+### Status
+Accepted
+
+### Context
+Milestone 4 requires bridging the deterministic project model (M1), project graph (M2), and change evidence (M3) to produce structured context packets for the future AI Gateway (M5). Feeding unbounded repositories or raw files into LLM prompts causes token exhaustion, leaks secrets, exposes irrelevant noise, and invites non-deterministic hallucinations.
+
+### Options Considered
+1. **LLM-Driven Context Selection & Summarization**: Ask an AI model to read the repository and select relevant files. Completely violates determinism, creates an AI dependency prior to M5, leaks secrets before review, and is slow/costly.
+2. **Simple Naive File Dumps**: Concatenate all changed files and pass them blindly. Leaks credentials and easily exceeds token budgets on large diffs or files.
+3. **Deterministic 7-Stage Pipeline with Transparent Scoring Tiers and Pre-Flight Redaction**:
+   - `RAW DATA -> NORMALIZE -> RELEVANCE FILTER -> SECRET DETECTION -> REDACTION -> COMPRESS -> CONTEXT PACKET`.
+   - Explicit relevance scoring formula (100.0 directly changed files, 95.0 diff hunks, 90.0 targets, 70.0 dependencies, 60.0 dependents, 50.0 tests, 40.0 configs, 30.0 evidence, 0.0 unrelated files filtered out).
+   - Regex-based secret detection and redaction *before* compression and budgeting.
+   - Deterministic SHA-256 caching and ContextPacket IDs.
+
+### Chosen Approach
+Adopt Option 3. ContextEngine operates purely with deterministic Python algorithms. Candidate items are extracted, scored, sanitized of sensitive patterns, compressed, budgeted, and assembled into `ContextPacket` entities with full provenance tracking.
+
+### Rationale
+- 100% deterministic, audit-traceable, and testable without external network dependencies.
+- Zero AI code or model inference in M4.
+- Secrets are eliminated before context leaves memory or is persisted to SQLite.
+- Bounded token budget (3,000–6,000 tokens) ensures fast and reliable future model inference.
+
+### Trade-offs & Consequences
+- Regular expression detection covers common credential patterns (API keys, bearer tokens, passwords, private keys, .env assignments), but cannot detect 100% of novel or obfuscated secrets.
+- Character-based token heuristic (`len // 4`) is an approximation of model-specific subword tokenizers.
+
+### Date
+2026-10-03
+

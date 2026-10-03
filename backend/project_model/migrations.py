@@ -186,10 +186,71 @@ def migration_v3(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_evidence_records_set ON evidence_records(change_set_id)")
 
 
+def migration_v4(conn: sqlite3.Connection) -> None:
+    """Version 4: Context engine (context_requests, context_packets, context_items)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS context_requests (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            purpose TEXT NOT NULL,
+            change_set_id TEXT,
+            target_files TEXT NOT NULL,
+            budget_tokens INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_requests_project ON context_requests(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_requests_changeset ON context_requests(change_set_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS context_packets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            request_id TEXT,
+            purpose TEXT NOT NULL,
+            packet_version TEXT NOT NULL,
+            token_estimate INTEGER NOT NULL,
+            truncation_status TEXT NOT NULL,
+            redaction_summary TEXT NOT NULL,
+            evidence_refs TEXT NOT NULL,
+            cache_key TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (request_id) REFERENCES context_requests(id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_packets_project ON context_packets(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_packets_cache ON context_packets(cache_key)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS context_items (
+            id TEXT NOT NULL,
+            packet_id TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_reference TEXT NOT NULL,
+            file_path TEXT,
+            line_start INTEGER,
+            line_end INTEGER,
+            relevance_reason TEXT NOT NULL,
+            relevance_score REAL NOT NULL,
+            redacted INTEGER NOT NULL,
+            evidence_refs TEXT NOT NULL,
+            content TEXT NOT NULL,
+            item_order INTEGER NOT NULL,
+            PRIMARY KEY (packet_id, id),
+            FOREIGN KEY (packet_id) REFERENCES context_packets(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_context_items_packet ON context_items(packet_id)")
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
     (3, "Development context: change_sets, file_changes, diff_hunks, evidence_records", migration_v3),
+    (4, "Context engine: context_requests, context_packets, context_items", migration_v4),
 ]
 
 
