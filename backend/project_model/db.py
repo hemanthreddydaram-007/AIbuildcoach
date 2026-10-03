@@ -1300,6 +1300,28 @@ class Database:
         finally:
             conn.close()
 
+    def atomic_transition_viva_session_to_evaluating(self, session_id: str) -> bool:
+        """Atomically transitions viva session status from AWAITING_ANSWER to EVALUATING.
+        Returns True if exactly one row was updated, False otherwise.
+        """
+        from backend.domain.models import utc_now_iso
+
+        now_iso = utc_now_iso()
+        conn = self.get_connection()
+        try:
+            with conn:
+                cursor = conn.execute(
+                    """
+                    UPDATE viva_sessions
+                    SET status = 'EVALUATING', updated_at = ?
+                    WHERE session_id = ? AND status = 'AWAITING_ANSWER'
+                    """,
+                    (now_iso, session_id),
+                )
+                return cursor.rowcount == 1
+        finally:
+            conn.close()
+
     def save_viva_question(
         self,
         question_id: str,

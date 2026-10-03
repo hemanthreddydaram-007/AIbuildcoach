@@ -769,8 +769,12 @@ def test_zero_persistence_of_student_answer(
         conn.close()
 
 
-def test_stale_evaluating_crash_recovery(temp_db: Database):
-    """Test 13: Stale EVALUATING session recovers turn as UNKNOWN and marks session FAILED."""
+def test_stale_evaluating_crash_recovery(
+    temp_db: Database,
+    sample_index: ProjectArchitecturalIndex,
+    sample_consent_token: ConsentToken,
+):
+    """Test 13: Stale EVALUATING session recovers turn as UNKNOWN and returns session to AWAITING_ANSWER."""
     session_id = "vs_stale_test"
     now = datetime.now(timezone.utc)
     stale_time = (now - timedelta(seconds=200)).isoformat()
@@ -792,12 +796,48 @@ def test_stale_evaluating_crash_recovery(temp_db: Database):
     conn.close()
 
     recovered_session = recover_stale_session_if_needed(temp_db, session_id)
-    assert recovered_session["status"] == VivaSessionStatus.FAILED.value
+    # Session returns to AWAITING_ANSWER per Fix 3
+    assert recovered_session["status"] == VivaSessionStatus.AWAITING_ANSWER.value
+    assert recovered_session["current_turn"] == 0
 
     # Turn recorded as UNKNOWN
     turns = temp_db.get_viva_turns_for_session(session_id)
     assert len(turns) == 1
     assert turns[0]["rating"] == VivaRating.UNKNOWN.value
+
+    # Persisted question remains active and current
+    curr_q = get_current_question(temp_db, session_id)
+    assert curr_q is not None
+    assert curr_q.turn_index == 0
+
+    # Candidate can resubmit the answer
+    mock_gw = MockGateway(
+        claims=[
+            StructuredClaim(
+                statement="VIVA_EVAL:STRONG:TRUE | Verified upon resubmission.",
+                claim_type=ClaimType.OBSERVATION,
+                evidence_refs=["ci_db_01"],
+            )
+        ]
+    )
+    engine = ContextEngine(temp_db)
+    sub = VivaAnswerSubmission(
+        submission_id="sub_resubmit",
+        session_id=session_id,
+        question_id=curr_q.question_id,
+        turn_index=0,
+        answer_text="Resubmitted answer with correct SQLite transaction logic.",
+    )
+    eval_res, next_q, updated_rec = submit_viva_answer_and_step(
+        db=temp_db,
+        session_id=session_id,
+        submission=sub,
+        index=sample_index,
+        context_engine=engine,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert eval_res.rating == VivaRating.STRONG
 
 
 def test_viva_report_readiness_and_not_evaluated_vs_unknown(temp_db: Database):
@@ -1158,4 +1198,297 @@ def test_max_followup_limit_across_session(
 
     assert followup_count <= MAX_FOLLOWUPS_PER_SESSION
     assert session_rec.followups_asked <= MAX_FOLLOWUPS_PER_SESSION
+
+
+def test_deep_difficulty_ceiling(
+    temp_db: Database,
+    sample_index: ProjectArchitecturalIndex,
+    sample_consent_token: ConsentToken,
+):
+    """Test 20: DEEP difficulty ceiling prevents promotion past DEEP and generates invariant-focused questions."""
+    assert promote_difficulty(VivaDifficulty.DEEP) == VivaDifficulty.DEEP
+
+    mock_gw = MockGateway(
+        claims=[
+            StructuredClaim(
+                statement="VIVA_EVAL:STRONG:TRUE | Candidate demonstrated architectural mastery at DEEP tier.",
+                claim_type=ClaimType.OBSERVATION,
+                evidence_refs=["ci_db_01"],
+            )
+        ]
+    )
+    engine = ContextEngine(temp_db)
+
+    session_rec, q0 = start_viva_session(
+        db=temp_db,
+        project_id="proj_1",
+        initial_difficulty=VivaDifficulty.DEEP,
+        index=sample_index,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert q0.difficulty == VivaDifficulty.DEEP
+
+    sub = VivaAnswerSubmission(
+        submission_id="s_deep",
+        session_id=session_rec.session_id,
+        question_id=q0.question_id,
+        turn_index=0,
+        answer_text="Deep architectural trade-off analysis of SQLite locking.",
+    )
+    eval_res, next_q, session_rec = submit_viva_answer_and_step(
+        db=temp_db,
+        session_id=session_rec.session_id,
+        submission=sub,
+        index=sample_index,
+        context_engine=engine,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+
+    assert eval_res.rating == VivaRating.STRONG
+    assert session_rec.current_difficulty == VivaDifficulty.DEEP
+    if next_q:
+        assert next_q.difficulty == VivaDifficulty.DEEP
+
+
+def test_readiness_eight_strong_one_unknown_never_defence_ready(temp_db: Database):
+    """Test 21: Regression test: 8 STRONG + 1 UNKNOWN categories must NEVER produce DEFENCE_READY."""
+    session_id = "vs_regress_unknown"
+    categories = list(VivaCategory)
+    assert len(categories) == 9
+
+    temp_db.create_viva_session(
+        session_id=session_id,
+        project_id="proj_1",
+        mode=VivaSessionMode.PROJECT_WIDE.value,
+        initial_difficulty=VivaDifficulty.EASY.value,
+        target_categories=[c.value for c in categories],
+        started_at=utc_now_iso(),
+    )
+
+    # 8 STRONG categories, 1 UNKNOWN category
+    for i, cat in enumerate(categories):
+        q_id = f"vq_reg_{i}"
+        temp_db.save_viva_question(
+            question_id=q_id,
+            session_id=session_id,
+            turn_index=i,
+            category=cat.value,
+            difficulty=VivaDifficulty.EASY.value,
+            question_text=f"Question for {cat.value}",
+            target_modules=[],
+            target_files=[],
+            expected_concepts=[],
+            supporting_evidence_ids=[],
+            is_follow_up=False,
+            parent_question_id=None,
+            packet_id=f"pkt_{i}",
+            created_at=utc_now_iso(),
+        )
+
+        rating = VivaRating.UNKNOWN if i == 0 else VivaRating.STRONG
+        is_grounded = False if i == 0 else True
+        temp_db.record_viva_turn(
+            turn_id=f"ve_reg_{i}",
+            session_id=session_id,
+            turn_index=i,
+            question_id=q_id,
+            category=cat.value,
+            difficulty=VivaDifficulty.EASY.value,
+            rating=rating.value,
+            is_project_grounded=is_grounded,
+            gap_count=0,
+            is_follow_up=False,
+            evaluated_at=utc_now_iso(),
+        )
+
+    report = compile_viva_report(temp_db, session_id)
+    # MUST be NEEDS_PREPARATION, NEVER DEFENCE_READY
+    assert report.readiness != VivaDefenceReadiness.DEFENCE_READY
+    assert report.readiness == VivaDefenceReadiness.NEEDS_PREPARATION
+
+
+def test_awaiting_answer_restart_recovery(
+    temp_db: Database,
+    sample_index: ProjectArchitecturalIndex,
+    sample_consent_token: ConsentToken,
+):
+    """Test 22: Server restart in AWAITING_ANSWER recovers current question and allows submission without regenerating."""
+    mock_gw = MockGateway(
+        claims=[
+            StructuredClaim(
+                statement="VIVA_QUESTION | How does the database manage schema migrations?",
+                claim_type=ClaimType.OBSERVATION,
+                evidence_refs=["ci_db_01"],
+            )
+        ]
+    )
+
+    # 1. Start session
+    session_rec, first_q = start_viva_session(
+        db=temp_db,
+        project_id="proj_1",
+        index=sample_index,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert session_rec.status == VivaSessionStatus.AWAITING_ANSWER
+    initial_q_id = first_q.question_id
+    initial_q_text = first_q.question_text
+
+    # 2. Simulate server restart: re-instantiate components and load question from DB
+    recovered_q = get_current_question(temp_db, session_rec.session_id)
+    assert recovered_q is not None
+    assert recovered_q.question_id == initial_q_id
+    assert recovered_q.question_text == initial_q_text
+
+    # 3. Submit answer to recovered question
+    eval_gw = MockGateway(
+        claims=[
+            StructuredClaim(
+                statement="VIVA_EVAL:STRONG:TRUE | Excellent understanding of schema migration versions.",
+                claim_type=ClaimType.OBSERVATION,
+                evidence_refs=["ci_db_01"],
+            )
+        ]
+    )
+    engine = ContextEngine(temp_db)
+    sub = VivaAnswerSubmission(
+        submission_id="sub_restart",
+        session_id=session_rec.session_id,
+        question_id=recovered_q.question_id,
+        turn_index=0,
+        answer_text="Migrations run sequentially inside atomic transactions.",
+    )
+    eval_res, next_q, updated_session = submit_viva_answer_and_step(
+        db=temp_db,
+        session_id=session_rec.session_id,
+        submission=sub,
+        index=sample_index,
+        context_engine=engine,
+        gateway=eval_gw,
+        consent_token=sample_consent_token,
+    )
+    assert eval_res.rating == VivaRating.STRONG
+    assert updated_session.current_turn == 1
+
+
+def test_max_followup_per_base_hard_stop(
+    temp_db: Database,
+    sample_index: ProjectArchitecturalIndex,
+    sample_consent_token: ConsentToken,
+):
+    """Test 23: When candidate answers WEAK on a follow-up, engine advances to next base question (never a second follow-up)."""
+    mock_gw = MockGateway(
+        claims=[
+            StructuredClaim(
+                statement="VIVA_EVAL:WEAK:TRUE | Candidate struggled.",
+                claim_type=ClaimType.OBSERVATION,
+                evidence_refs=["ci_db_01"],
+            )
+        ]
+    )
+    engine = ContextEngine(temp_db)
+
+    # Start session
+    session_rec, base_q0 = start_viva_session(
+        db=temp_db,
+        project_id="proj_1",
+        index=sample_index,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert base_q0.is_follow_up is False
+
+    # Turn 0: Base question receives WEAK answer -> triggers follow-up
+    sub0 = VivaAnswerSubmission(
+        submission_id="s0",
+        session_id=session_rec.session_id,
+        question_id=base_q0.question_id,
+        turn_index=0,
+        answer_text="Weak answer on base question.",
+    )
+    eval0, followup_q, session_rec = submit_viva_answer_and_step(
+        db=temp_db,
+        session_id=session_rec.session_id,
+        submission=sub0,
+        index=sample_index,
+        context_engine=engine,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert eval0.rating == VivaRating.WEAK
+    assert followup_q is not None
+    assert followup_q.is_follow_up is True
+    assert followup_q.parent_question_id == base_q0.question_id
+
+    # Turn 1: Follow-up question ALSO receives WEAK answer -> MUST advance to next BASE question
+    sub1 = VivaAnswerSubmission(
+        submission_id="s1",
+        session_id=session_rec.session_id,
+        question_id=followup_q.question_id,
+        turn_index=1,
+        answer_text="Weak answer on follow-up question.",
+    )
+    eval1, next_q, session_rec = submit_viva_answer_and_step(
+        db=temp_db,
+        session_id=session_rec.session_id,
+        submission=sub1,
+        index=sample_index,
+        context_engine=engine,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+    assert eval1.rating == VivaRating.WEAK
+    assert next_q is not None
+    # Hard stop: must be a base question, NOT a second follow-up
+    assert next_q.is_follow_up is False
+    assert next_q.parent_question_id is None
+
+
+def test_atomic_concurrent_answer_submission(
+    temp_db: Database,
+    sample_index: ProjectArchitecturalIndex,
+    sample_consent_token: ConsentToken,
+):
+    """Test 24: Atomic conditional update prevents concurrent submissions; exactly one wins and the second fails safely."""
+    mock_gw = MockGateway()
+    engine = ContextEngine(temp_db)
+
+    session_rec, first_q = start_viva_session(
+        db=temp_db,
+        project_id="proj_1",
+        index=sample_index,
+        gateway=mock_gw,
+        consent_token=sample_consent_token,
+    )
+
+    # 1. First atomic transition succeeds (updates exactly 1 row)
+    first_transition = temp_db.atomic_transition_viva_session_to_evaluating(session_rec.session_id)
+    assert first_transition is True
+
+    # 2. Second concurrent transition fails (0 rows updated because status is no longer AWAITING_ANSWER)
+    second_transition = temp_db.atomic_transition_viva_session_to_evaluating(session_rec.session_id)
+    assert second_transition is False
+
+    # 3. Submitting an answer while session is EVALUATING raises ConcurrentSessionError
+    sub = VivaAnswerSubmission(
+        submission_id="sub_race",
+        session_id=session_rec.session_id,
+        question_id=first_q.question_id,
+        turn_index=0,
+        answer_text="Concurrent answer attempt.",
+    )
+    with pytest.raises(ConcurrentSessionError, match="already evaluating"):
+        submit_viva_answer_and_step(
+            db=temp_db,
+            session_id=session_rec.session_id,
+            submission=sub,
+            index=sample_index,
+            context_engine=engine,
+            gateway=mock_gw,
+            consent_token=sample_consent_token,
+        )
+
 

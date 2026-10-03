@@ -96,8 +96,8 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## What Was Tested
-- **Test Suite**: 158 automated tests passing in `tests/`:
-  - `test_viva.py` (19 tests):
+- **Test Suite**: 163 automated tests passing in `tests/`:
+  - `test_viva.py` (24 tests):
     1. Architectural index mapping across all categories
     2. Session creation and first question generation
     3. Fast-path empty and repetitive gibberish bypass without AI gateway calls
@@ -110,13 +110,18 @@ This document serves as the project's operational memory across development sess
     10. Adaptive follow-up trigger and limits (MAX_FOLLOWUP_PER_BASE = 1)
     11. Session bounds and completion with report generation
     12. Zero persistence of student answer text in SQLite
-    13. Stale EVALUATING crash recovery (>180s) recording turn as UNKNOWN
+    13. Stale EVALUATING crash recovery (>180s) recording turn as UNKNOWN and returning to AWAITING_ANSWER
     14. Distinction between NOT_EVALUATED and UNKNOWN in viva reports
     15. Invalid turn progression and mismatch errors
     16. In-flight EVALUATING session concurrency guard
     17. CATEGORY_FOCUS mode completion and readiness
     18. Unhandled gateway failure recovery with UNKNOWN turn recording
     19. MAX_FOLLOWUPS_PER_SESSION cap enforcement
+    20. DEEP difficulty ceiling prevents promotion past DEEP
+    21. Regression test: 8 STRONG + 1 UNKNOWN categories never produce DEFENCE_READY
+    22. AWAITING_ANSWER restart recovery without regenerating active question
+    23. MAX_FOLLOWUP_PER_BASE hard stop on weak follow-up answers
+    24. Atomic concurrent answer submission conditional update
   - `test_comprehension.py` (17 tests): Canonical M6 context binding, fast-path, 4 dimensions, grounding, crash recovery, teaching.
   - `test_understand_change.py` (12 tests): File and changeset categorization, physical truth immutability, criticality, epistemic classification, local snippets, prompt boundary, fallback, consent.
   - `test_ai_gateway.py` (23 tests): Consent, BYOK credentials, Interactions API payload shape, timeouts, retries, grounding.
@@ -127,7 +132,7 @@ This document serves as the project's operational memory across development sess
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 158 passed in 31.51s.
+- **Live Local Test**: 163 passed in 21.76s.
 
 ---
 

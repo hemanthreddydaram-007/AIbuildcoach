@@ -120,7 +120,7 @@ def recover_stale_session_if_needed(db: Database, session_id: str) -> Dict[str, 
                         is_follow_up=q_is_followup,
                         evaluated_at=utc_now_iso(),
                     )
-                db.update_viva_session(session_id, status=VivaSessionStatus.FAILED.value)
+                db.update_viva_session(session_id, status=VivaSessionStatus.AWAITING_ANSWER.value)
                 session_data = db.get_viva_session(session_id)
         except Exception:
             pass
@@ -260,13 +260,7 @@ def submit_viva_answer_and_step(
     # 1. Recover stale session if stranded in EVALUATING
     session_data = recover_stale_session_if_needed(db, session_id)
 
-    # 2. Validate session state
-    status = VivaSessionStatus(session_data["status"])
-    if status == VivaSessionStatus.EVALUATING:
-        raise ConcurrentSessionError(f"Session {session_id} is already evaluating an answer.")
-    if status != VivaSessionStatus.AWAITING_ANSWER:
-        raise InvalidTurnProgressionError(f"Session is in {status.value} state, expected AWAITING_ANSWER.")
-
+    # 2. Validate current turn and active question
     current_turn = session_data["current_turn"]
     if submission.turn_index != current_turn:
         raise InvalidTurnProgressionError(
@@ -282,6 +276,18 @@ def submit_viva_answer_and_step(
         raise InvalidTurnProgressionError(
             f"Submission question_id {submission.question_id} does not match active question {q_data['question_id']}."
         )
+
+    # 4. Atomically transition session from AWAITING_ANSWER to EVALUATING (require exactly 1 affected row)
+    transitioned = db.atomic_transition_viva_session_to_evaluating(session_id)
+    if not transitioned:
+        fresh_data = db.get_viva_session(session_id)
+        current_status = fresh_data["status"] if fresh_data else "UNKNOWN"
+        if current_status == VivaSessionStatus.EVALUATING.value:
+            raise ConcurrentSessionError(f"Session {session_id} is already evaluating an answer.")
+        else:
+            raise InvalidTurnProgressionError(
+                f"Session is in {current_status} state, expected AWAITING_ANSWER."
+            )
 
     question = VivaQuestion(
         question_id=q_data["question_id"],
@@ -299,9 +305,6 @@ def submit_viva_answer_and_step(
         packet_id=q_data["packet_id"],
         created_at=q_data["created_at"],
     )
-
-    # 4. Atomically transition session to EVALUATING
-    db.update_viva_session(session_id, status=VivaSessionStatus.EVALUATING.value)
 
     # 5. Assemble context packet for the question category
     target_files = index.get_category_files(question.category, limit=5)

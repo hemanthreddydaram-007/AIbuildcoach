@@ -154,23 +154,29 @@ def compile_viva_report(
         unknown_cats = [c for c in target_categories if category_masteries[c].rating == VivaRating.UNKNOWN]
         strong_or_adeq = [c for c in target_categories if category_masteries[c].rating in (VivaRating.STRONG, VivaRating.ADEQUATE)]
 
-        if len(weak_cats) >= 2 or len(unknown_cats) >= 2 or len(critical_gaps) >= 3:
+        if len(weak_cats) > 0 or len(critical_gaps) > 0:
             readiness = VivaDefenceReadiness.SUBSTANTIAL_GAPS
             summary = (
                 f"Candidate exhibited substantial knowledge gaps across {len(weak_cats)} categories "
                 f"with {len(critical_gaps)} critical gaps identified."
             )
-        elif len(weak_cats) == 1 or len(partial_cats) >= 2 or len(strong_or_adeq) < int(0.7 * len(target_categories)):
+        elif len(unknown_cats) > 0 or len(partial_cats) > 0:
             readiness = VivaDefenceReadiness.NEEDS_PREPARATION
+            affected = [c.value for c in unknown_cats + partial_cats]
             summary = (
-                f"Candidate demonstrated partial understanding, but needs targeted preparation in "
-                f"{', '.join(c.value for c in weak_cats + partial_cats)}."
+                f"Candidate demonstrated partial or unverified understanding, needing targeted preparation in: "
+                f"{', '.join(affected)}."
             )
-        else:
+        elif len(strong_or_adeq) == len(target_categories):
             readiness = VivaDefenceReadiness.DEFENCE_READY
             summary = (
                 f"Candidate demonstrated robust, project-grounded comprehension across all {len(target_categories)} "
                 f"target categories. Fully prepared for oral defence."
+            )
+        else:
+            readiness = VivaDefenceReadiness.NEEDS_PREPARATION
+            summary = (
+                f"Candidate demonstrated partial preparation across target categories."
             )
 
     report_id = f"vr_{uuid.uuid4().hex[:12]}"
