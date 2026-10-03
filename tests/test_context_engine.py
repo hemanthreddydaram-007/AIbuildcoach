@@ -487,6 +487,52 @@ def test_21_critical_item_preservation_during_truncation():
     assert status == "TRUNCATED"
 
 
+def test_21b_critical_items_alone_exceeding_budget_reports_truncated():
+    """Verifies that when critical items alone exceed budget_tokens:
+    1. Critical items remain in the packet
+    2. token_estimate > budget_tokens
+    3. truncation_status == 'TRUNCATED'
+    """
+    crit1 = ContextItem(
+        item_id="crit1",
+        source_type=ContextSourceType.CHANGESET,
+        source_reference="fc_1",
+        relevance_reason="directly changed file 1",
+        relevance_score=100.0,
+        content="A" * 400,  # 100 tokens
+    )
+    crit2 = ContextItem(
+        item_id="crit2",
+        source_type=ContextSourceType.DIFF,
+        source_reference="hunk_1",
+        relevance_reason="changed diff hunk",
+        relevance_score=95.0,
+        content="B" * 400,  # 100 tokens
+    )
+    # Total tokens = 200, budget = 50 tokens
+    budgeted, tokens, status = apply_budget([crit1, crit2], budget_tokens=50)
+
+    assert len(budgeted) == 2
+    assert crit1 in budgeted
+    assert crit2 in budgeted
+    assert tokens > 50
+    assert status == "TRUNCATED"
+
+
+def test_21c_engine_preserves_critical_and_reports_truncated_when_over_budget(temp_db):
+    """Verifies end-to-end ContextEngine reports TRUNCATED when critical items exceed budget."""
+    engine = ContextEngine(db=temp_db)
+    cs = create_sample_changeset()
+    files = {"auth.py": "def auth():\n" + "    line = 'some very long line of code'\n" * 50}
+    req = ContextRequest(project_id="proj_1", change_set=cs, budget_tokens=20)
+    packet = engine.build_context_packet(req, files, use_cache=False)
+
+    assert any(item.relevance_score >= 90.0 for item in packet.items)
+    assert packet.token_estimate > 20
+    assert packet.truncation_status == "TRUNCATED"
+
+
+
 # 22. Compression behavior
 def test_22_compression_behavior():
     raw_text = "def foo():   \n\n\n\n\n    pass   \n"

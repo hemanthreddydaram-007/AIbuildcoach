@@ -110,5 +110,6 @@ def apply_budget(
                 # Exceeds budget, drop lower relevance item
                 truncated = True
 
-    truncation_status = "TRUNCATED" if truncated else "NONE"
+    truncation_status = "TRUNCATED" if (truncated or total_tokens > budget_tokens) else "NONE"
     return selected_items, total_tokens, truncation_status
+
