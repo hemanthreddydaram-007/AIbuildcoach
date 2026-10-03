@@ -309,6 +309,88 @@ def migration_v7(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_comprehension_runs_lookup ON comprehension_runs(project_id, changeset_id, prompt_id, attempt_number)")
 
 
+def migration_v8(conn: sqlite3.Connection) -> None:
+    """Version 8: Viva Defence Engine (viva_sessions, viva_questions, viva_turns, viva_reports)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS viva_sessions (
+            session_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            status TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            current_turn INTEGER NOT NULL,
+            base_questions_asked INTEGER NOT NULL,
+            followups_asked INTEGER NOT NULL,
+            current_difficulty TEXT NOT NULL,
+            target_categories_json TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            completed_at TEXT
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_viva_sessions_proj ON viva_sessions(project_id)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS viva_questions (
+            question_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            category TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            question_text TEXT NOT NULL,
+            target_modules_json TEXT NOT NULL,
+            target_files_json TEXT NOT NULL,
+            expected_concepts_json TEXT NOT NULL,
+            supporting_evidence_ids_json TEXT NOT NULL,
+            is_follow_up INTEGER NOT NULL,
+            parent_question_id TEXT,
+            packet_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES viva_sessions(session_id) ON DELETE CASCADE,
+            CONSTRAINT uq_viva_question_turn UNIQUE (session_id, turn_index)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_viva_questions_lookup ON viva_questions(session_id, turn_index)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS viva_turns (
+            turn_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            turn_index INTEGER NOT NULL,
+            question_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            rating TEXT NOT NULL,
+            is_project_grounded INTEGER NOT NULL,
+            gap_count INTEGER NOT NULL,
+            is_follow_up INTEGER NOT NULL,
+            evaluated_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES viva_sessions(session_id) ON DELETE CASCADE,
+            FOREIGN KEY (question_id) REFERENCES viva_questions(question_id) ON DELETE CASCADE,
+            CONSTRAINT uq_viva_session_turn UNIQUE (session_id, turn_index)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_viva_turns_lookup ON viva_turns(session_id, turn_index)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS viva_reports (
+            report_id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL UNIQUE,
+            project_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            total_turns INTEGER NOT NULL,
+            readiness TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            category_masteries_json TEXT NOT NULL,
+            strengths_json TEXT NOT NULL,
+            gaps_json TEXT NOT NULL,
+            study_files_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES viva_sessions(session_id) ON DELETE CASCADE
+        )
+    """)
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
@@ -317,6 +399,7 @@ MIGRATIONS: List[Migration] = [
     (5, "AI Gateway: gateway_runs", migration_v5),
     (6, "Understand What Changed: understand_change_runs", migration_v6),
     (7, "Comprehension runs: comprehension_runs", migration_v7),
+    (8, "Viva Defence Engine: viva_sessions, viva_questions, viva_turns, viva_reports", migration_v8),
 ]
 
 

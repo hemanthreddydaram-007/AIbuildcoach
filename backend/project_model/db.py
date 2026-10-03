@@ -1186,5 +1186,350 @@ class Database:
         finally:
             conn.close()
 
+    # -------------------------------------------------------------------------
+    # Milestone 8: Viva Defence Engine Operations
+    # -------------------------------------------------------------------------
+
+    def create_viva_session(
+        self,
+        session_id: str,
+        project_id: str,
+        status: str = "ACTIVE",
+        mode: str = "PROJECT_WIDE",
+        current_turn: int = 0,
+        base_questions_asked: int = 0,
+        followups_asked: int = 0,
+        current_difficulty: str = "EASY",
+        target_categories: Optional[List[str]] = None,
+        started_at: Optional[str] = None,
+        initial_difficulty: Optional[str] = None,
+    ) -> None:
+        """Creates a new Viva Defence session in SQLite."""
+        from backend.domain.models import utc_now_iso
+
+        diff = initial_difficulty or current_difficulty
+        cats = target_categories or []
+        start_ts = started_at or utc_now_iso()
+
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO viva_sessions (
+                        session_id, project_id, status, mode, current_turn,
+                        base_questions_asked, followups_asked, current_difficulty,
+                        target_categories_json, started_at, updated_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                    """,
+                    (
+                        session_id,
+                        project_id,
+                        status,
+                        mode,
+                        current_turn,
+                        base_questions_asked,
+                        followups_asked,
+                        diff,
+                        json.dumps(cats),
+                        start_ts,
+                        start_ts,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_viva_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a viva session record by session_id."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM viva_sessions WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            data["target_categories"] = json.loads(data["target_categories_json"])
+            return data
+        finally:
+            conn.close()
+
+    def update_viva_session(
+        self,
+        session_id: str,
+        status: Optional[str] = None,
+        current_turn: Optional[int] = None,
+        base_questions_asked: Optional[int] = None,
+        followups_asked: Optional[int] = None,
+        current_difficulty: Optional[str] = None,
+        completed_at: Optional[str] = None,
+    ) -> None:
+        """Updates viva session status, turn counts, and difficulty."""
+        from backend.domain.models import utc_now_iso
+
+        now_iso = utc_now_iso()
+        fields = ["updated_at = ?"]
+        params = [now_iso]
+
+        if status is not None:
+            fields.append("status = ?")
+            params.append(status)
+        if current_turn is not None:
+            fields.append("current_turn = ?")
+            params.append(current_turn)
+        if base_questions_asked is not None:
+            fields.append("base_questions_asked = ?")
+            params.append(base_questions_asked)
+        if followups_asked is not None:
+            fields.append("followups_asked = ?")
+            params.append(followups_asked)
+        if current_difficulty is not None:
+            fields.append("current_difficulty = ?")
+            params.append(current_difficulty)
+        if completed_at is not None:
+            fields.append("completed_at = ?")
+            params.append(completed_at)
+
+        params.append(session_id)
+        query = f"UPDATE viva_sessions SET {', '.join(fields)} WHERE session_id = ?"
+
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(query, tuple(params))
+        finally:
+            conn.close()
+
+    def save_viva_question(
+        self,
+        question_id: str,
+        session_id: str,
+        turn_index: int,
+        category: str,
+        difficulty: str,
+        question_text: str,
+        target_modules: List[str],
+        target_files: List[str],
+        expected_concepts: List[str],
+        supporting_evidence_ids: List[str],
+        is_follow_up: bool,
+        parent_question_id: Optional[str],
+        packet_id: str,
+        created_at: str,
+    ) -> None:
+        """Persists a viva question so the session can resume or recover after restart."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO viva_questions (
+                        question_id, session_id, turn_index, category, difficulty,
+                        question_text, target_modules_json, target_files_json,
+                        expected_concepts_json, supporting_evidence_ids_json,
+                        is_follow_up, parent_question_id, packet_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id, turn_index) DO UPDATE SET
+                        question_text = excluded.question_text,
+                        difficulty = excluded.difficulty,
+                        category = excluded.category
+                    """,
+                    (
+                        question_id,
+                        session_id,
+                        turn_index,
+                        category,
+                        difficulty,
+                        question_text,
+                        json.dumps(target_modules),
+                        json.dumps(target_files),
+                        json.dumps(expected_concepts),
+                        json.dumps(supporting_evidence_ids),
+                        1 if is_follow_up else 0,
+                        parent_question_id,
+                        packet_id,
+                        created_at,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_viva_question(self, session_id: str, turn_index: int) -> Optional[Dict[str, Any]]:
+        """Retrieves a persisted viva question by session and turn index."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM viva_questions WHERE session_id = ? AND turn_index = ?",
+                (session_id, turn_index),
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            data["target_modules"] = json.loads(data["target_modules_json"])
+            data["target_files"] = json.loads(data["target_files_json"])
+            data["expected_concepts"] = json.loads(data["expected_concepts_json"])
+            data["supporting_evidence_ids"] = json.loads(data["supporting_evidence_ids_json"])
+            data["is_follow_up"] = bool(data["is_follow_up"])
+            return data
+        finally:
+            conn.close()
+
+    def get_viva_questions_for_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieves all questions generated for a session ordered by turn index."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM viva_questions WHERE session_id = ? ORDER BY turn_index ASC",
+                (session_id,),
+            )
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                data["target_modules"] = json.loads(data["target_modules_json"])
+                data["target_files"] = json.loads(data["target_files_json"])
+                data["expected_concepts"] = json.loads(data["expected_concepts_json"])
+                data["supporting_evidence_ids"] = json.loads(data["supporting_evidence_ids_json"])
+                data["is_follow_up"] = bool(data["is_follow_up"])
+                results.append(data)
+            return results
+        finally:
+            conn.close()
+
+    def record_viva_turn(
+        self,
+        turn_id: str,
+        session_id: str,
+        turn_index: int,
+        question_id: str,
+        category: str,
+        difficulty: str,
+        rating: str,
+        is_project_grounded: bool,
+        gap_count: int,
+        is_follow_up: bool,
+        evaluated_at: str,
+    ) -> None:
+        """Records an evaluated viva turn in SQLite (zero student answer text)."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO viva_turns (
+                        turn_id, session_id, turn_index, question_id,
+                        category, difficulty, rating, is_project_grounded,
+                        gap_count, is_follow_up, evaluated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id, turn_index) DO UPDATE SET
+                        rating = excluded.rating,
+                        is_project_grounded = excluded.is_project_grounded,
+                        gap_count = excluded.gap_count,
+                        evaluated_at = excluded.evaluated_at
+                    """,
+                    (
+                        turn_id,
+                        session_id,
+                        turn_index,
+                        question_id,
+                        category,
+                        difficulty,
+                        rating,
+                        1 if is_project_grounded else 0,
+                        gap_count,
+                        1 if is_follow_up else 0,
+                        evaluated_at,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_viva_turns_for_session(self, session_id: str) -> List[Dict[str, Any]]:
+        """Retrieves all evaluated viva turns for a session."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT * FROM viva_turns WHERE session_id = ? ORDER BY turn_index ASC",
+                (session_id,),
+            )
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                data["is_project_grounded"] = bool(data["is_project_grounded"])
+                data["is_follow_up"] = bool(data["is_follow_up"])
+                results.append(data)
+            return results
+        finally:
+            conn.close()
+
+    def save_viva_report(
+        self,
+        report_id: str,
+        session_id: str,
+        project_id: str,
+        mode: str,
+        total_turns: int,
+        readiness: str,
+        summary: str,
+        category_masteries_json: str,
+        strengths_json: str,
+        gaps_json: str,
+        study_files_json: str,
+        created_at: str,
+    ) -> None:
+        """Persists final Viva Defence Report with full reconstructability."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO viva_reports (
+                        report_id, session_id, project_id, mode, total_turns,
+                        readiness, summary, category_masteries_json, strengths_json,
+                        gaps_json, study_files_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        readiness = excluded.readiness,
+                        summary = excluded.summary,
+                        category_masteries_json = excluded.category_masteries_json,
+                        strengths_json = excluded.strengths_json,
+                        gaps_json = excluded.gaps_json,
+                        study_files_json = excluded.study_files_json
+                    """,
+                    (
+                        report_id,
+                        session_id,
+                        project_id,
+                        mode,
+                        total_turns,
+                        readiness,
+                        summary,
+                        category_masteries_json,
+                        strengths_json,
+                        gaps_json,
+                        study_files_json,
+                        created_at,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_viva_report(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves persisted final Viva Defence Report by session_id."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM viva_reports WHERE session_id = ?", (session_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return dict(row)
+        finally:
+            conn.close()
+
+
 
 
