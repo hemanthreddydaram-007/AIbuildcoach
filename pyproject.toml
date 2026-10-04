@@ -18,6 +18,9 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[project.scripts]
+ai-build-coach = "backend.cli.main:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

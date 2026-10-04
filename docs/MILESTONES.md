@@ -125,13 +125,14 @@ Every milestone must strictly execute the following engineering cycle before pro
   - Natural language evaluation, targeted micro-teaching, and re-testing.
 - **Gate**: Questions are strictly grounded in project evidence, rejecting generic computer science textbook trivia. [Status: COMPLETED - 163/163 tests passing]
 
-#### Milestone 9 — VS Code Extension Client
-- **Goal**: Lightweight developer UI inside VS Code.
+#### Milestone 9 — Unified Engine CLI & One-Shot Headless JSON Interface
+- **Goal**: Unified CLI entrypoint and headless one-shot JSON contract for human terminal usage and external host tool integrations.
 - **Scope**:
-  - Workspace detection and local engine IPC.
-  - Minimal UI rendering "Understand what changed" and "Prepare for viva".
-  - Question presentation and user answer submission forms.
-- **Gate**: Extension contains zero autonomous code editing, terminal execution, or telemetry bloat.
+  - Interactive terminal client and commands (`status`, `scan`, `understand`, `viva`).
+  - Headless one-shot JSON interface (`--json` flag) producing strictly schema-compliant envelopes on stdout.
+  - Zero persistence of student answers; stdin-based inputs (`--answer-stdin`, interactive prompts).
+  - Diagnostic logs directed strictly to stderr.
+- **Gate**: Single unified CLI binary/module entrypoint (`ai-build-coach`, `python -m backend.cli`) with clean stdout separation and 188/188 passing tests. [Status: COMPLETED - 188/188 tests passing]
 
 #### Milestone 10 — V1 Polish, Multi-Repo Testing & Validation
 - **Goal**: End-to-end validation across multiple real-world stacks (Python, TypeScript, React, Java).

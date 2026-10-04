@@ -5,7 +5,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 8: Workflow 2: Viva Defence Engine**
+**Milestone 9: Unified Engine CLI & One-Shot Headless JSON Interface**
 
 ## Status
 **Completed / Ready for Audit Gate Review**
@@ -122,6 +122,32 @@ This document serves as the project's operational memory across development sess
     22. AWAITING_ANSWER restart recovery without regenerating active question
     23. MAX_FOLLOWUP_PER_BASE hard stop on weak follow-up answers
     24. Atomic concurrent answer submission conditional update
+  - `test_cli.py` (25 tests):
+    1. Version output `--version` (package metadata & pyproject.toml fallback)
+    2. Python module entrypoint `python -m backend.cli`
+    3. Global and subparser `--help`
+    4. Flexible `--json` flag position (leading, trailing, subcommand)
+    5. Automatic workspace root and project discovery
+    6. Clean git repository status inspection
+    7. Dirty working tree status inspection
+    8. Structured JSON status envelope
+    9. Passive project scanner execution via CLI
+    10. Interactive preview of uncommitted changes
+    11. Clean tree handling in change explanation preview
+    12. Structured JSON change explanation preview
+    13. Explanation synthesis with user consent token
+    14. Safe abortion on consent rejection
+    15. Interactive stdin explanation submission & rating
+    16. Headless JSON explanation submission & evaluation
+    17. Interactive viva session initialization
+    18. Headless JSON viva session initialization
+    19. Adaptive turn progression via `--answer-stdin`
+    20. Fast-path empty/gibberish turn handling
+    21. Final comprehensive viva report generation
+    22. Invariant test: Zero persistence of student answers in SQLite
+    23. Pure stdout isolation in `--json` mode
+    24. Standardized error envelope format on failure
+    25. CLI invariant: rejection of `--answer` argument flag
   - `test_comprehension.py` (17 tests): Canonical M6 context binding, fast-path, 4 dimensions, grounding, crash recovery, teaching.
   - `test_understand_change.py` (12 tests): File and changeset categorization, physical truth immutability, criticality, epistemic classification, local snippets, prompt boundary, fallback, consent.
   - `test_ai_gateway.py` (23 tests): Consent, BYOK credentials, Interactions API payload shape, timeouts, retries, grounding.
@@ -132,7 +158,7 @@ This document serves as the project's operational memory across development sess
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 163 passed in 21.76s.
+- **Live Local Test**: 188 passed in 58.07s.
 
 ---
 
@@ -144,8 +170,8 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Next Milestone
-**Milestone 9: VS Code Extension Client**
-- Workspace detection and local engine IPC.
-- Minimal UI rendering "Understand what changed" and "Prepare for viva".
-- Question presentation and user answer submission forms.
+**Milestone 10: V1 Polish, Multi-Repo Testing & Validation**
+- Comprehensive multi-repo test suite (Python, TypeScript, React, Java).
+- Performance benchmarking (local scanning < 1s, AI response < 10s).
+- Systematic verification against validation hypotheses (H1–H7).
 
