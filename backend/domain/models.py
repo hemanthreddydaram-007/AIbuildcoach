@@ -362,3 +362,33 @@ class ConversationEvidenceResult(BaseModel):
     analyzed_at: str = Field(default_factory=utc_now_iso)
 
 
+class VerificationVerdict(str):
+    SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    UNKNOWN = "UNKNOWN"
+    NOT_EVALUATED = "NOT_EVALUATED"
+
+
+class VerificationRequest(BaseModel):
+    claim: ConversationClaim
+    supplied_evidence_links: List[EvidenceLink] = Field(default_factory=list)
+    evidence_details: Dict[str, Any] = Field(default_factory=dict)
+    project_facts: Dict[str, Any] = Field(default_factory=dict)
+    constraints: List[str] = Field(default_factory=list)
+    verification_objective: str = "Verify conversation claim against supplied project evidence."
+
+
+class VerificationResult(BaseModel):
+    verification_id: str
+    claim_id: str
+    verdict: str
+    explanation: str
+    grounded_evidence_ids: List[str] = Field(default_factory=list)
+    confidence: str = "HIGH"
+    limitations: List[str] = Field(default_factory=list)
+    provider_metadata: Dict[str, Any] = Field(default_factory=dict)
+    verified_at: str = Field(default_factory=utc_now_iso)
+
+
+

@@ -534,3 +534,46 @@ def run_conversation_analyze(
         "summary": result.summary,
     }
 
+
+def run_conversation_verify(
+    db: Database,
+    conversation_id: str,
+    claim_id: str,
+    project_id: Optional[str] = None,
+    has_consent: bool = False,
+    gateway: Optional[Any] = None,
+    explicit_api_key: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Verifies a conversation claim using AI Gateway against deterministic M11.1 evidence."""
+    from backend.conversation.verification_service import ConversationVerificationService
+    from backend.conversation.evidence_service import ConversationEvidenceService
+    from backend.domain.models import VerificationRequest
+    from backend.ai_gateway.consent import ConsentManager
+
+    if not conversation_id:
+        raise ValueError("Missing required --conversation-id.")
+    if not claim_id:
+        raise ValueError("Missing required --claim-id.")
+    if not project_id:
+        raise ValueError("Missing required --project-id.")
+
+    service = ConversationVerificationService(db, gateway=gateway)
+
+    consent_token = None
+    if has_consent:
+        _, packet = service.prepare_verification(conversation_id, claim_id, project_id)
+        consent_token = ConsentManager.grant_consent(packet, provider="gemini", model="gemini-3.8-flash")
+
+    result = service.verify_claim(
+        conversation_id=conversation_id,
+        claim_id=claim_id,
+        project_id=project_id,
+        consent_token=consent_token,
+        explicit_api_key=explicit_api_key,
+    )
+    return {
+        "status": "success",
+        "verification": result.model_dump(),
+    }
+
+

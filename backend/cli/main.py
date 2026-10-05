@@ -18,6 +18,7 @@ from backend.cli.runner import (
     run_conversation_import,
     run_conversation_normalize,
     run_conversation_analyze,
+    run_conversation_verify,
 )
 from backend.cli.json_output import emit_json_response, emit_json_error, log_diagnostic
 from backend.cli.interactive import main_menu
@@ -135,6 +136,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_parser = conv_subparsers.add_parser("analyze", parents=[json_parent], help="Analyze conversation against project evidence")
     analyze_parser.add_argument("--conversation-id", type=str, required=True, help="Conversation ID to analyze")
     analyze_parser.add_argument("--project-id", type=str, default=None, help="Project ID to analyze (defaults to current project)")
+
+    # conversation verify
+    verify_parser = conv_subparsers.add_parser("verify", parents=[json_parent], help="Verify a conversation claim using AI Gateway")
+    verify_parser.add_argument("--conversation-id", type=str, required=True, help="Conversation ID")
+    verify_parser.add_argument("--claim-id", type=str, required=True, help="Claim ID to verify")
+    verify_parser.add_argument("--project-id", type=str, default=None, help="Project ID (defaults to current project)")
+    verify_parser.add_argument("--consent", action="store_true", default=False, help="Explicit consent for AI Gateway processing")
 
     return main_parser
 
@@ -402,6 +410,41 @@ def main(argv: Optional[List[str]] = None) -> int:
                     emit_json_error("conversation", "analyze", "CONVERSATION_ANALYZE_ERROR", str(exc))
                 else:
                     sys.stderr.write(f"Conversation analyze error: {exc}\n")
+                return 2
+
+        if action == "verify":
+            conversation_id = getattr(args, "conversation_id", None)
+            claim_id = getattr(args, "claim_id", None)
+            project_id = getattr(args, "project_id", None) or (project.id if project else None)
+            has_consent = getattr(args, "consent", False)
+
+            if not conversation_id or not claim_id:
+                if getattr(args, "json", False):
+                    emit_json_error("conversation", "verify", "MISSING_ARGUMENT", "--conversation-id and --claim-id are required.")
+                else:
+                    sys.stderr.write("Error: --conversation-id and --claim-id are required.\n")
+                return 2
+
+            try:
+                res = run_conversation_verify(
+                    db=db,
+                    conversation_id=conversation_id,
+                    claim_id=claim_id,
+                    project_id=project_id,
+                    has_consent=has_consent,
+                )
+                if getattr(args, "json", False):
+                    emit_json_response("conversation", "verify", res)
+                else:
+                    verdict = res["verification"]["verdict"]
+                    expl = res["verification"]["explanation"]
+                    print(f"Verified claim {claim_id}: {verdict} - {expl}")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("conversation", "verify", "CONVERSATION_VERIFY_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Conversation verify error: {exc}\n")
                 return 2
 
         # Read payload from file or stdin

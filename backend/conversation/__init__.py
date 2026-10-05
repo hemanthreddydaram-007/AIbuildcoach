@@ -12,8 +12,12 @@ from backend.domain.models import (
     ConversationEvidenceResult,
     ClaimStatus,
     EvidenceRelation,
+    VerificationVerdict,
+    VerificationRequest,
+    VerificationResult,
 )
 from backend.conversation.evidence_service import ConversationEvidenceService
+from backend.conversation.verification_service import ConversationVerificationService
 
 __all__ = [
     "Conversation",
@@ -27,6 +31,11 @@ __all__ = [
     "ConversationEvidenceResult",
     "ClaimStatus",
     "EvidenceRelation",
+    "VerificationVerdict",
+    "VerificationRequest",
+    "VerificationResult",
     "ConversationEvidenceService",
+    "ConversationVerificationService",
 ]
+
 
