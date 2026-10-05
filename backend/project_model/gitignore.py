@@ -165,36 +165,53 @@ class IgnoreFilter:
         except (IOError, OSError):
             pass
 
-    def is_ignored(self, path: Path, is_dir: bool = False) -> bool:
-        try:
-            resolved = path.resolve()
-            rel_path = str(resolved.relative_to(self.root_dir)).replace("\\", "/")
-        except ValueError:
-            # Path outside root
-            return True
+    def is_ignored(self, path: Path, is_dir: bool = False, rel_path: Optional[str] = None) -> bool:
+        resolved: Optional[Path] = None
 
-        if rel_path == "." or not rel_path:
+        if rel_path is not None:
+            clean_rel = rel_path.replace("\\", "/").strip("/")
+        else:
+            try:
+                # Fast path: compute relative path without calling path.resolve()
+                clean_rel = str(path.relative_to(self.root_dir)).replace("\\", "/")
+            except ValueError:
+                # Path might be relative, symlink, or outside root_dir: resolve safely
+                try:
+                    resolved = path.resolve()
+                    clean_rel = str(resolved.relative_to(self.root_dir)).replace("\\", "/")
+                except ValueError:
+                    # Path outside root
+                    return True
+
+        if clean_rel == "." or not clean_rel:
             return False
 
         # Check default exclusions by path segments
-        parts = rel_path.split("/")
+        parts = clean_rel.split("/")
         for part in parts:
             if part in DEFAULT_EXCLUSIONS:
                 return True
 
         # If checking a file or sub-directory, verify if any parent directory is ignored
-        if not is_dir or "/" in rel_path:
-            parent = resolved.parent
-            if parent != resolved and parent != self.root_dir and self.root_dir in parent.parents:
-                if self.is_ignored(parent, is_dir=True):
-                    return True
+        if "/" in clean_rel:
+            parent_rel = clean_rel.rsplit("/", 1)[0]
+            if parent_rel and self.is_ignored(self.root_dir / parent_rel, is_dir=True, rel_path=parent_rel):
+                return True
 
         ignored = False
         for rule in self.rules:
-            try:
-                rule_rel = str(resolved.relative_to(rule.base_dir)).replace("\\", "/")
-            except ValueError:
-                continue
+            if rule.base_dir == self.root_dir:
+                rule_rel = clean_rel
+            else:
+                if resolved is None:
+                    try:
+                        resolved = path.resolve()
+                    except (OSError, ValueError):
+                        continue
+                try:
+                    rule_rel = str(resolved.relative_to(rule.base_dir)).replace("\\", "/")
+                except ValueError:
+                    continue
 
             if rule.matches(rule_rel, is_dir):
                 if rule.is_negation:

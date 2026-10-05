@@ -5,10 +5,10 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Current Milestone
-**Milestone 9: Unified Engine CLI & One-Shot Headless JSON Interface**
+**Milestone 10: V1 Polish, Multi-Repo Testing & Validation**
 
 ## Status
-**Completed / Ready for Audit Gate Review**
+**Completed / V1 Production Verification Ready**
 
 ---
 
@@ -122,6 +122,31 @@ This document serves as the project's operational memory across development sess
     22. AWAITING_ANSWER restart recovery without regenerating active question
     23. MAX_FOLLOWUP_PER_BASE hard stop on weak follow-up answers
     24. Atomic concurrent answer submission conditional update
+  - `test_validation_multi_repo.py` (8 tests):
+    1. Python FastAPI Workflow 1 preview -> explain -> submit
+    2. Python FastAPI Workflow 2 viva start -> submit -> report
+    3. TypeScript Node Workflow 1 with multiline import graph and staged/unstaged changes
+    4. TypeScript Node Workflow 2 with graph mapping and category mastery
+    5. React Frontend Workflow 1 with JSX/TSX changes and component hierarchy
+    6. React Frontend Workflow 2 with component identification and architecture defence
+    7. Java Gradle graceful scan, node indexing without hallucinated edges, and prompt boundary
+    8. Broken Edge Cases with binary null-bytes, non-UTF8 files, >1MB log file, and secret redaction
+  - `test_hypotheses.py` (10 tests):
+    1. H1: Physical truth invariance against model hallucinations
+    2. H2: Evidence-grounded viva question generation citing verified ContextItem IDs
+    3. H3: Strict epistemic qualification of author intent without hallucinated intent
+    4. H4: Zero untrusted code execution (no npm, pip, gradle, mvn, shell scripts)
+    5. H5: Student Answer Privacy Boundary (transient memory, absent from argv, SQLite, logs, stderr)
+    6. H6: Frozen M6 change explanation fallback on gateway timeout
+    7. H6: Frozen M7 FAILED run recording & M8 UNKNOWN turn graceful handling on gateway outage (503)
+    8. H7a: Multi-stack functional portability across Python, TypeScript, React, Java, and Edge Cases
+    9. H7b: Performance SLA conformance across core operations
+    10. Headless CLI pure JSON stdout isolation across all stacks
+  - `test_benchmarks.py` (4 tests):
+    1. In-process local scan & file indexing (< 1000ms SLA target; actual: ~897ms)
+    2. In-process graph construction (< 500ms SLA target; actual: ~42ms)
+    3. In-process context pipeline assembly (< 500ms SLA target; actual: ~4ms)
+    4. Headless CLI status --json execution (< 250ms SLA target; actual: ~218ms)
   - `test_cli.py` (25 tests):
     1. Version output `--version` (package metadata & pyproject.toml fallback)
     2. Python module entrypoint `python -m backend.cli`
@@ -158,7 +183,7 @@ This document serves as the project's operational memory across development sess
   - `test_gitignore.py` (3 tests): Root-anchored rules, wildcards, negations, boundaries.
   - `test_graph.py` (14 tests): Nodes, edges, AST & regex imports, multiline statements, sync lifecycle.
   - `test_scanner.py` (12 tests): Root detection, binary files, large files (>1MB), boundary enforcement, permissions.
-- **Live Local Test**: 188 passed in 58.07s.
+- **Live Local Test**: 210 passed in 93.96s.
 
 ---
 
@@ -170,8 +195,7 @@ This document serves as the project's operational memory across development sess
 ---
 
 ## Next Milestone
-**Milestone 10: V1 Polish, Multi-Repo Testing & Validation**
-- Comprehensive multi-repo test suite (Python, TypeScript, React, Java).
-- Performance benchmarking (local scanning < 1s, AI response < 10s).
-- Systematic verification against validation hypotheses (H1–H7).
+**Phase 2: Post-V1 Enhancements (Milestone 11: What Next?)**
+- Post-V1 next useful action recommendations based on project state and learning trajectory.
+- Explicitly deferred until authorization.
 

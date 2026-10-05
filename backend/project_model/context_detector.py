@@ -51,7 +51,7 @@ class ContextDetector:
         self.project_id = project_id
         self.git_bin = shutil.which("git")
 
-    def collect(self) -> ChangeSet:
+    def collect(self, git_state: Optional[GitState] = None) -> ChangeSet:
         """Collects development context following the 5-layer priority:
         1. Working-tree state
         2. git status
@@ -61,29 +61,45 @@ class ContextDetector:
         """
         created_at = utc_now_iso()
 
-        # Check if Git is available and directory is a git repo
+        # Check if Git is available
         if not self.git_bin:
             return self._build_non_git_changeset(created_at, "Git binary not found on system")
 
-        git_state = detect_git_state(self.project_root)
+        if git_state is None:
+            git_state = detect_git_state(self.project_root, git_bin=self.git_bin)
+
         if not git_state.is_git_repo:
             return self._build_non_git_changeset(created_at, "Directory is not a Git repository")
 
         # Layer 2: git status --porcelain=v1 -uall
-        status_output = _run_git_cmd(self.git_bin, self.project_root, ["status", "--porcelain=v1", "-uall"])
-        if status_output is None:
-            return self._build_non_git_changeset(created_at, "Failed to execute git status")
+        # If git_state reports a clean tree, skip status and diff queries safely
+        if not git_state.is_dirty:
+            status_output = ""
+            unstaged_diff_raw = ""
+            staged_diff_raw = ""
+        else:
+            status_output = _run_git_cmd(self.git_bin, self.project_root, ["status", "--porcelain=v1", "-uall"])
+            if status_output is None:
+                return self._build_non_git_changeset(created_at, "Failed to execute git status")
 
-        # Layer 3: unstaged diff
-        unstaged_diff_raw = _run_git_cmd(self.git_bin, self.project_root, ["diff", "--no-color", "-p", "-U3"]) or ""
+            # Layer 3: unstaged diff (only if there are modified/deleted working-tree files)
+            if git_state.modified_count > 0:
+                unstaged_diff_raw = _run_git_cmd(self.git_bin, self.project_root, ["diff", "--no-color", "-p", "-U3"]) or ""
+            else:
+                unstaged_diff_raw = ""
+
+            # Layer 4: staged diff (only if there are staged files)
+            if git_state.staged_count > 0:
+                staged_diff_raw = _run_git_cmd(self.git_bin, self.project_root, ["diff", "--cached", "--no-color", "-p", "-U3"]) or ""
+            else:
+                staged_diff_raw = ""
+
         unstaged_diffs = parse_unified_diff(unstaged_diff_raw)
         unstaged_map: Dict[str, ParsedFileDiff] = {d.new_path: d for d in unstaged_diffs}
         for d in unstaged_diffs:
             if d.old_path:
                 unstaged_map[d.old_path] = d
 
-        # Layer 4: staged diff
-        staged_diff_raw = _run_git_cmd(self.git_bin, self.project_root, ["diff", "--cached", "--no-color", "-p", "-U3"]) or ""
         staged_diffs = parse_unified_diff(staged_diff_raw)
         staged_map: Dict[str, ParsedFileDiff] = {d.new_path: d for d in staged_diffs}
         for d in staged_diffs:

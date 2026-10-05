@@ -137,10 +137,10 @@ Every milestone must strictly execute the following engineering cycle before pro
 #### Milestone 10 — V1 Polish, Multi-Repo Testing & Validation
 - **Goal**: End-to-end validation across multiple real-world stacks (Python, TypeScript, React, Java).
 - **Scope**:
-  - Comprehensive integration test suite.
-  - Performance benchmarking (local scanning < 1s, AI response < 10s).
-  - Systematic testing against validation hypotheses (H1–H7).
-- **Gate**: Both V1 workflows proven reliable across all target repo fixtures.
+  - Comprehensive multi-repo test suite (FastAPI, Node TypeScript, React JSX/TSX, Java Gradle, and Edge Cases).
+  - Performance benchmarking validating SLAs: scan < 1.0s, graph construction < 500ms, context assembly < 500ms, CLI status --json < 250ms.
+  - Systematic empirical testing against validation hypotheses (H1–H6, H7a, H7b).
+- **Gate**: Both V1 workflows proven reliable across all target repo fixtures and 210/210 passing tests. [Status: COMPLETED - 210/210 tests passing]
 
 ---
 

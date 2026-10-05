@@ -90,14 +90,28 @@ def compute_sha256(file_path: Path) -> str:
         return ""
 
 
-def scan_file(file_path: Path, root_path: Path) -> Optional[ProjectFile]:
-    """Inspects a single file safely and returns a ProjectFile record."""
-    try:
-        resolved = file_path.resolve()
-        # Verify path boundary to prevent path traversal
-        rel_path = str(resolved.relative_to(root_path)).replace("\\", "/")
-    except (ValueError, OSError):
-        return None
+def scan_file(
+    file_path: Path,
+    root_path: Path,
+    cached_info: Optional[Tuple[int, float, str, bool]] = None,
+    rel_path: Optional[str] = None,
+) -> Optional[ProjectFile]:
+    """Inspects a single file safely and returns a ProjectFile record.
+    
+    Reuses cached SHA-256 and binary detection when file size and st_mtime are unchanged.
+    Reuses pre-computed relative path when available to avoid redundant resolve calls.
+    """
+    if rel_path is not None:
+        clean_rel = rel_path.replace("\\", "/")
+        abs_path_str = str(file_path)
+    else:
+        try:
+            resolved = file_path.resolve()
+            # Verify path boundary to prevent path traversal
+            clean_rel = str(resolved.relative_to(root_path)).replace("\\", "/")
+            abs_path_str = str(resolved)
+        except (ValueError, OSError):
+            return None
 
     try:
         stat_res = file_path.stat()
@@ -108,12 +122,29 @@ def scan_file(file_path: Path, root_path: Path) -> Optional[ProjectFile]:
     last_modified = stat_res.st_mtime
     file_type = file_path.suffix.lower() if file_path.suffix else "no_ext"
     is_large = file_size > MAX_FILE_SIZE_FOR_FULL_SCAN
+
+    # Incremental SHA-256: reuse cached hash when file size and mtime are unchanged
+    if cached_info is not None:
+        cached_size, cached_mtime, cached_hash, cached_is_binary = cached_info
+        if file_size == cached_size and abs(last_modified - cached_mtime) < 1e-4:
+            return ProjectFile(
+                path=clean_rel,
+                absolute_path=abs_path_str,
+                file_size=file_size,
+                last_modified=last_modified,
+                sha256_hash=cached_hash,
+                file_type=file_type,
+                is_binary=cached_is_binary,
+                is_large=is_large,
+                is_ignored=False,
+            )
+
     is_binary = is_binary_file(file_path)
     sha256_hash = compute_sha256(file_path)
 
     return ProjectFile(
-        path=rel_path,
-        absolute_path=str(resolved),
+        path=clean_rel,
+        absolute_path=abs_path_str,
         file_size=file_size,
         last_modified=last_modified,
         sha256_hash=sha256_hash,
@@ -154,6 +185,9 @@ class ProjectScanner:
         def _on_walk_error(err: OSError):
             scan_errors.append(f"Cannot access directory: {err}")
 
+        # Retrieve cached file fingerprints for incremental hashing
+        cached_fingerprints = self.db.get_cached_file_fingerprints(project.id)
+
         # Deterministic walk: sorted directory traversal
         for root, dirs, files in os.walk(
             self.project_root,
@@ -162,22 +196,39 @@ class ProjectScanner:
             onerror=_on_walk_error,
         ):
             root_path_obj = Path(root)
+            try:
+                rel_root = str(root_path_obj.relative_to(self.project_root)).replace("\\", "/")
+                if rel_root == ".":
+                    rel_root = ""
+            except (ValueError, OSError):
+                rel_root = ""
 
             # Filter out ignored directories in-place to prevent descending into them
             dirs.sort()
             dirs[:] = [
                 d
                 for d in dirs
-                if not self.ignore_filter.is_ignored(root_path_obj / d, is_dir=True)
+                if not self.ignore_filter.is_ignored(
+                    root_path_obj / d,
+                    is_dir=True,
+                    rel_path=f"{rel_root}/{d}" if rel_root else d,
+                )
             ]
 
             files.sort()
             for filename in files:
+                file_rel = f"{rel_root}/{filename}" if rel_root else filename
                 file_path_obj = root_path_obj / filename
-                if self.ignore_filter.is_ignored(file_path_obj, is_dir=False):
+                if self.ignore_filter.is_ignored(file_path_obj, is_dir=False, rel_path=file_rel):
                     continue
 
-                pfile = scan_file(file_path_obj, self.project_root)
+                cached_info = cached_fingerprints.get(file_rel)
+                pfile = scan_file(
+                    file_path_obj,
+                    self.project_root,
+                    cached_info=cached_info,
+                    rel_path=file_rel,
+                )
                 if pfile is not None:
                     scanned_files.append(pfile)
 
@@ -203,7 +254,7 @@ class ProjectScanner:
 
         # Collect and persist development context (M3: ChangeSet and Evidence)
         context_detector = ContextDetector(self.project_root, project.id)
-        change_set = context_detector.collect()
+        change_set = context_detector.collect(git_state=git_state)
         self.db.save_change_set(change_set)
 
         duration_ms = (time.perf_counter() - start_time) * 1000.0

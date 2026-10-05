@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set
+from typing import Optional, List, Dict, Any, Set, Tuple
 
 from backend.domain.models import (
     Project,
@@ -208,6 +208,26 @@ class Database:
                 )
                 for r in rows
             ]
+        finally:
+            conn.close()
+
+    def get_cached_file_fingerprints(self, project_id: str) -> Dict[str, Tuple[int, float, str, bool]]:
+        """Retrieves lightweight cached file fingerprints (size, mtime, sha256, is_binary) for incremental hashing."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT path, file_size, last_modified, sha256_hash, is_binary
+                FROM files WHERE project_id = ?
+                """,
+                (project_id,),
+            )
+            rows = cursor.fetchall()
+            return {
+                r["path"]: (r["file_size"], r["last_modified"], r["sha256_hash"], bool(r["is_binary"]))
+                for r in rows
+            }
         finally:
             conn.close()
 
