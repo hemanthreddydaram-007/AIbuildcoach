@@ -440,3 +440,71 @@ def run_viva_report(
         index=index,
     )
     return report.model_dump()
+
+
+def run_conversation_import(
+    root: Path,
+    db: Database,
+    provider: str,
+    raw_payload: str,
+    has_consent: bool,
+    project_id: Optional[str] = None,
+    source: str = "IMPORT",
+    title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Imports and persists a conversation with explicit consent verification and secret redaction."""
+    from backend.domain.models import ConversationConsent
+    from backend.conversation.service import ConversationIngestionService
+
+    consent = ConversationConsent(
+        consent_id=f"consent_{uuid.uuid4().hex[:8]}",
+        approved=has_consent,
+        reason="CLI user consent flag",
+    )
+    service = ConversationIngestionService(db=db)
+    conv = service.ingest(
+        provider=provider,
+        raw_payload=raw_payload,
+        consent=consent,
+        source=source,
+        project_id=project_id,
+        title=title,
+    )
+    return {
+        "status": "imported",
+        "conversation": conv.model_dump(),
+        "total_messages": len(conv.messages),
+    }
+
+
+def run_conversation_normalize(
+    provider: str,
+    raw_payload: str,
+    has_consent: bool,
+    project_id: Optional[str] = None,
+    source: str = "IMPORT",
+    title: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Normalizes a conversation payload without persisting to SQLite."""
+    from backend.domain.models import ConversationConsent
+    from backend.conversation.service import ConversationIngestionService
+
+    consent = ConversationConsent(
+        consent_id=f"consent_{uuid.uuid4().hex[:8]}",
+        approved=has_consent,
+        reason="CLI user consent flag",
+    )
+    service = ConversationIngestionService(db=None)
+    conv = service.normalize_only(
+        provider=provider,
+        raw_payload=raw_payload,
+        consent=consent,
+        source=source,
+        project_id=project_id,
+        title=title,
+    )
+    return {
+        "status": "normalized",
+        "conversation": conv.model_dump(),
+        "total_messages": len(conv.messages),
+    }

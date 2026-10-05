@@ -267,3 +267,53 @@ class ContextPacket(BaseModel):
     token_estimate: int = 0
     truncation_status: str = "NONE"  # "NONE", "TRUNCATED"
 
+
+class ConversationRole(str):
+    USER = "USER"
+    ASSISTANT = "ASSISTANT"
+    SYSTEM = "SYSTEM"
+
+
+class ConversationProvider(str):
+    CHATGPT = "CHATGPT"
+    CLAUDE = "CLAUDE"
+    GEMINI = "GEMINI"
+    OTHER = "OTHER"
+
+
+class ConversationSource(str):
+    PASTE = "PASTE"
+    IMPORT = "IMPORT"
+    FUTURE_EXTENSION = "FUTURE_EXTENSION"
+    FUTURE_DESKTOP = "FUTURE_DESKTOP"
+
+
+class ConversationMessage(BaseModel):
+    message_id: str
+    role: str  # USER, ASSISTANT, SYSTEM
+    content: str
+    timestamp: Optional[str] = None
+    sequence: int
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class Conversation(BaseModel):
+    conversation_id: str
+    provider: str  # CHATGPT, CLAUDE, GEMINI, OTHER
+    source: str = ConversationSource.IMPORT
+    project_id: Optional[str] = None
+    title: Optional[str] = None
+    created_at: str = Field(default_factory=utc_now_iso)
+    updated_at: str = Field(default_factory=utc_now_iso)
+    messages: List[ConversationMessage] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ConversationConsent(BaseModel):
+    consent_id: str
+    approved: bool
+    granted_at: str = Field(default_factory=utc_now_iso)
+    scope: str = "CONVERSATION_INGESTION"
+    reason: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+

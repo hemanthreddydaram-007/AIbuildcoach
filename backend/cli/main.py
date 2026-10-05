@@ -15,6 +15,8 @@ from backend.cli.runner import (
     run_viva_start,
     run_viva_submit,
     run_viva_report,
+    run_conversation_import,
+    run_conversation_normalize,
 )
 from backend.cli.json_output import emit_json_response, emit_json_error, log_diagnostic
 from backend.cli.interactive import main_menu
@@ -107,6 +109,26 @@ def build_parser() -> argparse.ArgumentParser:
     # viva report
     report_parser = viva_subparsers.add_parser("report", parents=[json_parent], help="Compile and display final viva report")
     report_parser.add_argument("--session-id", type=str, required=True, help="Viva session ID to report on")
+
+    # 5. conversation
+    conv_parser = subparsers.add_parser("conversation", parents=[json_parent], help="Workflow 3: Conversation Bridge Foundation")
+    conv_subparsers = conv_parser.add_subparsers(dest="conversation_action", help="Conversation actions")
+
+    # conversation import
+    import_parser = conv_subparsers.add_parser("import", parents=[json_parent], help="Import and persist conversation")
+    import_parser.add_argument("--provider", type=str, required=True, help="Provider name: chatgpt, claude, gemini, other")
+    import_parser.add_argument("--file", type=str, default=None, help="Path to conversation file")
+    import_parser.add_argument("--stdin", action="store_true", default=False, help="Read payload from stdin")
+    import_parser.add_argument("--consent", action="store_true", default=False, help="Explicit user consent for ingestion")
+    import_parser.add_argument("--title", type=str, default=None, help="Optional conversation title")
+
+    # conversation normalize
+    norm_parser = conv_subparsers.add_parser("normalize", parents=[json_parent], help="Normalize conversation without persistence")
+    norm_parser.add_argument("--provider", type=str, required=True, help="Provider name: chatgpt, claude, gemini, other")
+    norm_parser.add_argument("--file", type=str, default=None, help="Path to conversation file")
+    norm_parser.add_argument("--stdin", action="store_true", default=False, help="Read payload from stdin")
+    norm_parser.add_argument("--consent", action="store_true", default=False, help="Explicit user consent for ingestion")
+    norm_parser.add_argument("--title", type=str, default=None, help="Optional conversation title")
 
     return main_parser
 
@@ -337,6 +359,82 @@ def main(argv: Optional[List[str]] = None) -> int:
                     emit_json_error("viva", "report", "VIVA_REPORT_ERROR", str(exc))
                 else:
                     sys.stderr.write(f"Viva report error: {exc}\n")
+                return 2
+
+    elif args.command == "conversation":
+        action = getattr(args, "conversation_action", None)
+        if not action:
+            if args.json:
+                emit_json_error("conversation", "none", "MISSING_ACTION", "No conversation action specified (import or normalize).")
+            else:
+                parser.parse_args(["conversation", "--help"])
+            return 2
+
+        # Read payload from file or stdin
+        raw_payload = ""
+        if getattr(args, "file", None):
+            try:
+                with open(args.file, "r", encoding="utf-8", errors="replace") as f:
+                    raw_payload = f.read()
+            except OSError as err:
+                if args.json:
+                    emit_json_error("conversation", action, "FILE_READ_ERROR", f"Cannot read input file: {err}")
+                else:
+                    sys.stderr.write(f"File error: {err}\n")
+                return 2
+        elif getattr(args, "stdin", False):
+            raw_payload = sys.stdin.read()
+        else:
+            if args.json:
+                emit_json_error("conversation", action, "MISSING_INPUT", "Must provide either --file or --stdin.")
+            else:
+                sys.stderr.write("Error: Must provide either --file or --stdin.\n")
+            return 2
+
+        has_consent = getattr(args, "consent", False)
+
+        if action == "import":
+            root, db, project = resolve_workspace(project_root_arg)
+            try:
+                res = run_conversation_import(
+                    root=root,
+                    db=db,
+                    provider=args.provider,
+                    raw_payload=raw_payload,
+                    has_consent=has_consent,
+                    project_id=project.id,
+                    title=getattr(args, "title", None),
+                )
+                if args.json:
+                    emit_json_response("conversation", "import", res)
+                else:
+                    print(f"Imported conversation {res['conversation']['conversation_id']} with {res['total_messages']} messages.")
+                return 0
+            except Exception as exc:
+                if args.json:
+                    emit_json_error("conversation", "import", "CONVERSATION_IMPORT_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Conversation import error: {exc}\n")
+                return 2
+
+        elif action == "normalize":
+            try:
+                res = run_conversation_normalize(
+                    provider=args.provider,
+                    raw_payload=raw_payload,
+                    has_consent=has_consent,
+                    title=getattr(args, "title", None),
+                )
+                if args.json:
+                    emit_json_response("conversation", "normalize", res)
+                else:
+                    print(f"Normalized conversation {res['conversation']['conversation_id']} with {res['total_messages']} messages.")
+                return 0
+            except Exception as exc:
+                if args.json:
+                    emit_json_error("conversation", "normalize", "CONVERSATION_NORMALIZE_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Conversation normalize error: {exc}\n")
                 return 2
 
     return 0

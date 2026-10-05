@@ -391,6 +391,52 @@ def migration_v8(conn: sqlite3.Connection) -> None:
     """)
 
 
+def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
+    """Ensures conversation bridge tables exist with smallest compatible persistence design."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversations (
+            conversation_id TEXT PRIMARY KEY,
+            provider TEXT NOT NULL,
+            source TEXT NOT NULL,
+            project_id TEXT,
+            title TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversations_project ON conversations(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_conversations_provider ON conversations(provider)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_messages (
+            message_id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            timestamp TEXT,
+            sequence INTEGER NOT NULL,
+            metadata_json TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_conv_messages_conv_seq ON conversation_messages(conversation_id, sequence)")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_consents (
+            consent_id TEXT PRIMARY KEY,
+            approved INTEGER NOT NULL,
+            scope TEXT NOT NULL,
+            reason TEXT,
+            granted_at TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+
+
 MIGRATIONS: List[Migration] = [
     (1, "Initial schema: projects, files, git_states, scan_runs", migration_v1),
     (2, "Project graph: graph_nodes and graph_edges", migration_v2),
@@ -440,4 +486,5 @@ def apply_migrations(conn: sqlite3.Connection) -> List[int]:
                 )
             applied.append(version)
 
+    ensure_conversation_tables(conn)
     return applied

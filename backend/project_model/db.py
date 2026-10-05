@@ -28,6 +28,9 @@ from backend.domain.models import (
     ContextRequest,
     ContextPurpose,
     ContextSourceType,
+    Conversation,
+    ConversationMessage,
+    ConversationConsent,
 )
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
@@ -1569,6 +1572,176 @@ class Database:
             if not row:
                 return None
             return dict(row)
+        finally:
+            conn.close()
+
+    def save_conversation(self, conversation: Conversation) -> None:
+        """Persists a normalized Conversation and its messages atomically."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO conversations (
+                        conversation_id, provider, source, project_id, title,
+                        created_at, updated_at, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        conversation.conversation_id,
+                        conversation.provider,
+                        conversation.source,
+                        conversation.project_id,
+                        conversation.title,
+                        conversation.created_at,
+                        conversation.updated_at,
+                        json.dumps(conversation.metadata),
+                    ),
+                )
+
+                # Delete existing messages for this conversation to prevent duplicates
+                conn.execute(
+                    "DELETE FROM conversation_messages WHERE conversation_id = ?",
+                    (conversation.conversation_id,),
+                )
+
+                # Insert all messages in sequence
+                for msg in conversation.messages:
+                    conn.execute(
+                        """
+                        INSERT INTO conversation_messages (
+                            message_id, conversation_id, role, content,
+                            timestamp, sequence, metadata_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            msg.message_id,
+                            conversation.conversation_id,
+                            msg.role,
+                            msg.content,
+                            msg.timestamp,
+                            msg.sequence,
+                            json.dumps(msg.metadata),
+                        ),
+                    )
+        finally:
+            conn.close()
+
+    def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        """Loads a normalized Conversation with all sequenced messages."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM conversations WHERE conversation_id = ?", (conversation_id,))
+            c_row = cursor.fetchone()
+            if not c_row:
+                return None
+
+            cursor.execute(
+                "SELECT * FROM conversation_messages WHERE conversation_id = ? ORDER BY sequence ASC",
+                (conversation_id,),
+            )
+            m_rows = cursor.fetchall()
+
+            messages = [
+                ConversationMessage(
+                    message_id=mr["message_id"],
+                    role=mr["role"],
+                    content=mr["content"],
+                    timestamp=mr["timestamp"],
+                    sequence=mr["sequence"],
+                    metadata=json.loads(mr["metadata_json"]) if mr["metadata_json"] else {},
+                )
+                for mr in m_rows
+            ]
+
+            return Conversation(
+                conversation_id=c_row["conversation_id"],
+                provider=c_row["provider"],
+                source=c_row["source"],
+                project_id=c_row["project_id"],
+                title=c_row["title"],
+                created_at=c_row["created_at"],
+                updated_at=c_row["updated_at"],
+                messages=messages,
+                metadata=json.loads(c_row["metadata_json"]) if c_row["metadata_json"] else {},
+            )
+        finally:
+            conn.close()
+
+    def list_conversations(self, project_id: Optional[str] = None) -> List[Conversation]:
+        """Lists conversations optionally filtered by project_id."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            if project_id:
+                cursor.execute(
+                    "SELECT conversation_id FROM conversations WHERE project_id = ? ORDER BY created_at DESC",
+                    (project_id,),
+                )
+            else:
+                cursor.execute("SELECT conversation_id FROM conversations ORDER BY created_at DESC")
+            rows = cursor.fetchall()
+            convs = []
+            for r in rows:
+                c = self.get_conversation(r["conversation_id"])
+                if c:
+                    convs.append(c)
+            return convs
+        finally:
+            conn.close()
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        """Deletes a conversation and cascaded messages."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM conversations WHERE conversation_id = ?", (conversation_id,))
+                return cursor.rowcount > 0
+        finally:
+            conn.close()
+
+    def record_conversation_consent(self, consent: ConversationConsent) -> None:
+        """Records an explicit conversation ingestion user consent decision."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO conversation_consents (
+                        consent_id, approved, scope, reason, granted_at, metadata_json
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        consent.consent_id,
+                        1 if consent.approved else 0,
+                        consent.scope,
+                        consent.reason,
+                        consent.granted_at,
+                        json.dumps(consent.metadata),
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def get_conversation_consent(self, consent_id: str) -> Optional[ConversationConsent]:
+        """Retrieves a conversation ingestion consent record by consent_id."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM conversation_consents WHERE consent_id = ?", (consent_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return ConversationConsent(
+                consent_id=row["consent_id"],
+                approved=bool(row["approved"]),
+                scope=row["scope"],
+                reason=row["reason"],
+                granted_at=row["granted_at"],
+                metadata=json.loads(row["metadata_json"]) if row["metadata_json"] else {},
+            )
         finally:
             conn.close()
 
