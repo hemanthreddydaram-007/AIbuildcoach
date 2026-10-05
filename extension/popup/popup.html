@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Build Coach Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-area">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-title">AI Build Coach</span>
+      </div>
+      <div id="provider-badge" class="badge badge-unsupported">Checking...</div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="content">
+      <!-- State 1: Unsupported Page -->
+      <section id="state-unsupported" class="state-view hidden">
+        <div class="info-card">
+          <p class="info-title">Unsupported Provider Page</p>
+          <p class="info-desc">
+            Navigate to an active conversation on <strong>ChatGPT</strong>, <strong>Claude</strong>, or <strong>Gemini</strong> to capture conversations into AI Build Coach.
+          </p>
+        </div>
+      </section>
+
+      <!-- State 2: Ready to Capture -->
+      <section id="state-ready" class="state-view">
+        <div class="page-info">
+          <p class="label">Current Conversation</p>
+          <p id="page-title" class="title-text">Loading...</p>
+        </div>
+
+        <button id="btn-capture" class="btn btn-primary">
+          <span class="btn-icon">📥</span> Capture Conversation
+        </button>
+      </section>
+
+      <!-- State 3: Capturing Spinner -->
+      <section id="state-capturing" class="state-view hidden">
+        <div class="spinner-container">
+          <div class="spinner"></div>
+          <p>Extracting conversation & scanning secrets...</p>
+        </div>
+      </section>
+
+      <!-- State 4: Preview Before Transfer -->
+      <section id="state-preview" class="state-view hidden">
+        <div class="preview-header">
+          <span class="preview-badge" id="preview-provider">PROVIDER</span>
+          <span class="badge badge-secrets" id="preview-secrets">0 Secrets Detected</span>
+        </div>
+
+        <div class="preview-card">
+          <h4 id="preview-title" class="preview-title">Conversation Title</h4>
+          <p class="preview-count"><strong id="preview-msg-count">0</strong> messages extracted</p>
+
+          <div class="message-snippets">
+            <div class="snippet-block" id="snippet-first">
+              <span class="snippet-role" id="role-first">USER</span>
+              <p class="snippet-content" id="content-first">—</p>
+            </div>
+            <div class="snippet-block" id="snippet-last">
+              <span class="snippet-role" id="role-last">ASSISTANT</span>
+              <p class="snippet-content" id="content-last">—</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="project-association">
+          <label for="input-project-id" class="label">Target Project ID (Optional):</label>
+          <input type="text" id="input-project-id" placeholder="e.g. prj_default" class="input-text">
+        </div>
+
+        <div class="action-buttons">
+          <button id="btn-send" class="btn btn-success">
+            <span class="btn-icon">🚀</span> Send to Build Coach
+          </button>
+          <button id="btn-copy-json" class="btn btn-secondary" title="Copy JSON payload to clipboard">
+            📋 Copy JSON
+          </button>
+          <button id="btn-cancel" class="btn btn-outline">
+            Cancel
+          </button>
+        </div>
+      </section>
+
+      <!-- State 5: Transfer Success -->
+      <section id="state-success" class="state-view hidden">
+        <div class="success-card">
+          <span class="success-icon">✅</span>
+          <p class="success-title">Ready in Build Coach!</p>
+          <p class="success-desc" id="success-desc">Conversation was staged with zero background leakage.</p>
+          <button id="btn-done" class="btn btn-primary">Done</button>
+        </div>
+      </section>
+
+      <!-- Error Banner -->
+      <div id="error-banner" class="error-banner hidden">
+        <span id="error-text">An error occurred.</span>
+      </div>
+    </main>
+
+    <!-- Footer Security Notice -->
+    <footer class="footer">
+      <small>🔒 Client-side redacting. Explicit user capture only.</small>
+    </footer>
+  </div>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

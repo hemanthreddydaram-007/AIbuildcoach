@@ -284,6 +284,7 @@ class ConversationProvider(str):
 class ConversationSource(str):
     PASTE = "PASTE"
     IMPORT = "IMPORT"
+    WEB_EXTENSION = "WEB_EXTENSION"
     FUTURE_EXTENSION = "FUTURE_EXTENSION"
     FUTURE_DESKTOP = "FUTURE_DESKTOP"
 

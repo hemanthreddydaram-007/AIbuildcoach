@@ -1,0 +1,12 @@
+{
+  "name": "ai-build-coach-extension",
+  "version": "1.0.0",
+  "description": "Browser extension for AI Build Coach conversation capture",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
+  "keywords": ["ai-build-coach", "chatgpt", "claude", "gemini", "browser-extension"],
+  "author": "AI Build Coach Team",
+  "license": "MIT"
+}
