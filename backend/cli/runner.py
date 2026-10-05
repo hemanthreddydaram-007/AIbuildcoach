@@ -508,3 +508,29 @@ def run_conversation_normalize(
         "conversation": conv.model_dump(),
         "total_messages": len(conv.messages),
     }
+
+
+def run_conversation_analyze(
+    db: Database,
+    conversation_id: str,
+    project_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Analyzes a conversation against project evidence."""
+    from backend.conversation.evidence_service import ConversationEvidenceService
+
+    if not conversation_id:
+        raise ValueError("Missing required --conversation-id.")
+    if not project_id:
+        raise ValueError("Missing required --project-id.")
+
+    service = ConversationEvidenceService(db)
+    result = service.analyze_conversation(
+        conversation_id=conversation_id,
+        project_id=project_id,
+    )
+    return {
+        "status": "success",
+        "result": result.model_dump(),
+        "summary": result.summary,
+    }
+

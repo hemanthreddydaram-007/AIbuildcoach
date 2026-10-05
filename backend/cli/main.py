@@ -17,6 +17,7 @@ from backend.cli.runner import (
     run_viva_report,
     run_conversation_import,
     run_conversation_normalize,
+    run_conversation_analyze,
 )
 from backend.cli.json_output import emit_json_response, emit_json_error, log_diagnostic
 from backend.cli.interactive import main_menu
@@ -129,6 +130,11 @@ def build_parser() -> argparse.ArgumentParser:
     norm_parser.add_argument("--stdin", action="store_true", default=False, help="Read payload from stdin")
     norm_parser.add_argument("--consent", action="store_true", default=False, help="Explicit user consent for ingestion")
     norm_parser.add_argument("--title", type=str, default=None, help="Optional conversation title")
+
+    # conversation analyze
+    analyze_parser = conv_subparsers.add_parser("analyze", parents=[json_parent], help="Analyze conversation against project evidence")
+    analyze_parser.add_argument("--conversation-id", type=str, required=True, help="Conversation ID to analyze")
+    analyze_parser.add_argument("--project-id", type=str, default=None, help="Project ID to analyze (defaults to current project)")
 
     return main_parser
 
@@ -364,11 +370,39 @@ def main(argv: Optional[List[str]] = None) -> int:
     elif args.command == "conversation":
         action = getattr(args, "conversation_action", None)
         if not action:
-            if args.json:
-                emit_json_error("conversation", "none", "MISSING_ACTION", "No conversation action specified (import or normalize).")
+            if getattr(args, "json", False):
+                emit_json_error("conversation", "none", "MISSING_ACTION", "No conversation action specified (import, normalize, or analyze).")
             else:
                 parser.parse_args(["conversation", "--help"])
             return 2
+
+        if action == "analyze":
+            conversation_id = getattr(args, "conversation_id", None)
+            project_id = getattr(args, "project_id", None) or (project.id if project else None)
+            if not conversation_id:
+                if getattr(args, "json", False):
+                    emit_json_error("conversation", "analyze", "MISSING_ARGUMENT", "--conversation-id is required.")
+                else:
+                    sys.stderr.write("Error: --conversation-id is required.\n")
+                return 2
+
+            try:
+                res = run_conversation_analyze(
+                    db=db,
+                    conversation_id=conversation_id,
+                    project_id=project_id,
+                )
+                if getattr(args, "json", False):
+                    emit_json_response("conversation", "analyze", res)
+                else:
+                    print(f"Analyzed conversation {conversation_id}: {res['summary']['total_claims']} claims, {res['summary']['total_links']} links.")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("conversation", "analyze", "CONVERSATION_ANALYZE_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Conversation analyze error: {exc}\n")
+                return 2
 
         # Read payload from file or stdin
         raw_payload = ""
@@ -377,7 +411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 with open(args.file, "r", encoding="utf-8", errors="replace") as f:
                     raw_payload = f.read()
             except OSError as err:
-                if args.json:
+                if getattr(args, "json", False):
                     emit_json_error("conversation", action, "FILE_READ_ERROR", f"Cannot read input file: {err}")
                 else:
                     sys.stderr.write(f"File error: {err}\n")
@@ -385,7 +419,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         elif getattr(args, "stdin", False):
             raw_payload = sys.stdin.read()
         else:
-            if args.json:
+            if getattr(args, "json", False):
                 emit_json_error("conversation", action, "MISSING_INPUT", "Must provide either --file or --stdin.")
             else:
                 sys.stderr.write("Error: Must provide either --file or --stdin.\n")
@@ -405,13 +439,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     project_id=project.id,
                     title=getattr(args, "title", None),
                 )
-                if args.json:
+                if getattr(args, "json", False):
                     emit_json_response("conversation", "import", res)
                 else:
                     print(f"Imported conversation {res['conversation']['conversation_id']} with {res['total_messages']} messages.")
                 return 0
             except Exception as exc:
-                if args.json:
+                if getattr(args, "json", False):
                     emit_json_error("conversation", "import", "CONVERSATION_IMPORT_ERROR", str(exc))
                 else:
                     sys.stderr.write(f"Conversation import error: {exc}\n")
@@ -425,13 +459,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     has_consent=has_consent,
                     title=getattr(args, "title", None),
                 )
-                if args.json:
+                if getattr(args, "json", False):
                     emit_json_response("conversation", "normalize", res)
                 else:
                     print(f"Normalized conversation {res['conversation']['conversation_id']} with {res['total_messages']} messages.")
                 return 0
             except Exception as exc:
-                if args.json:
+                if getattr(args, "json", False):
                     emit_json_error("conversation", "normalize", "CONVERSATION_NORMALIZE_ERROR", str(exc))
                 else:
                     sys.stderr.write(f"Conversation normalize error: {exc}\n")

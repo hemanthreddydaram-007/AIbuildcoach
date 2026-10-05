@@ -391,8 +391,8 @@ def migration_v8(conn: sqlite3.Connection) -> None:
     """)
 
 
-def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
-    """Ensures conversation bridge tables exist with smallest compatible persistence design."""
+def migration_v9(conn: sqlite3.Connection) -> None:
+    """Version 9: Conversation Bridge Foundation (conversations, conversation_messages, conversation_consents)."""
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS conversations (
@@ -434,7 +434,11 @@ def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
             metadata_json TEXT NOT NULL
         )
     """)
-    conn.commit()
+
+
+def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
+    """Ensures conversation bridge tables exist with smallest compatible persistence design."""
+    migration_v9(conn)
 
 
 MIGRATIONS: List[Migration] = [
@@ -446,6 +450,7 @@ MIGRATIONS: List[Migration] = [
     (6, "Understand What Changed: understand_change_runs", migration_v6),
     (7, "Comprehension runs: comprehension_runs", migration_v7),
     (8, "Viva Defence Engine: viva_sessions, viva_questions, viva_turns, viva_reports", migration_v8),
+    (9, "Conversation Bridge Foundation: conversations, conversation_messages, conversation_consents", migration_v9),
 ]
 
 
@@ -486,5 +491,4 @@ def apply_migrations(conn: sqlite3.Connection) -> List[int]:
                 )
             applied.append(version)
 
-    ensure_conversation_tables(conn)
     return applied

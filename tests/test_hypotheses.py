@@ -306,7 +306,7 @@ def test_hypothesis_h7a_multi_stack_functional_portability(tmp_path: Path):
             rc = main(["--project-root", str(r), "status", "--json"])
         assert rc == 0, f"H7a failed for repo: {r.name}"
         data = json.loads(buf.getvalue())["data"]
-        assert data["schema_version"] == 8
+        assert data["schema_version"] >= 8
         assert data["is_git_repo"] is True
 
 

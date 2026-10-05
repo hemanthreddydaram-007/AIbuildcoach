@@ -317,3 +317,48 @@ class ConversationConsent(BaseModel):
     reason: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+
+class ClaimStatus(str):
+    UNVERIFIED = "UNVERIFIED"
+    SUPPORTED = "SUPPORTED"
+    PARTIALLY_SUPPORTED = "PARTIALLY_SUPPORTED"
+    UNSUPPORTED = "UNSUPPORTED"
+    UNKNOWN = "UNKNOWN"
+
+
+class EvidenceRelation(str):
+    SUPPORTS = "SUPPORTS"
+    PARTIALLY_SUPPORTS = "PARTIALLY_SUPPORTS"
+    CONTRADICTS = "CONTRADICTS"
+    NO_EVIDENCE = "NO_EVIDENCE"
+
+
+class ConversationClaim(BaseModel):
+    claim_id: str
+    conversation_id: str
+    message_id: str
+    claim_text: str
+    claim_type: str = "FILE_REFERENCE"
+    referenced_paths: List[str] = Field(default_factory=list)
+    confidence: str = "HIGH"
+    status: str = ClaimStatus.UNVERIFIED
+
+
+class EvidenceLink(BaseModel):
+    link_id: str
+    claim_id: str
+    evidence_id: str
+    evidence_type: str
+    relation: str = EvidenceRelation.SUPPORTS
+    confidence: str = "HIGH"
+
+
+class ConversationEvidenceResult(BaseModel):
+    conversation_id: str
+    project_id: str
+    claims: List[ConversationClaim] = Field(default_factory=list)
+    evidence_links: List[EvidenceLink] = Field(default_factory=list)
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    analyzed_at: str = Field(default_factory=utc_now_iso)
+
+

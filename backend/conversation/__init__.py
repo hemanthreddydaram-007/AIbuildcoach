@@ -7,7 +7,13 @@ from backend.domain.models import (
     ConversationProvider,
     ConversationSource,
     ConversationConsent,
+    ConversationClaim,
+    EvidenceLink,
+    ConversationEvidenceResult,
+    ClaimStatus,
+    EvidenceRelation,
 )
+from backend.conversation.evidence_service import ConversationEvidenceService
 
 __all__ = [
     "Conversation",
@@ -16,4 +22,11 @@ __all__ = [
     "ConversationProvider",
     "ConversationSource",
     "ConversationConsent",
+    "ConversationClaim",
+    "EvidenceLink",
+    "ConversationEvidenceResult",
+    "ClaimStatus",
+    "EvidenceRelation",
+    "ConversationEvidenceService",
 ]
+
