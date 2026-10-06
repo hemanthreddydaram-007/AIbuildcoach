@@ -520,8 +520,6 @@ def run_conversation_analyze(
 
     if not conversation_id:
         raise ValueError("Missing required --conversation-id.")
-    if not project_id:
-        raise ValueError("Missing required --project-id.")
 
     service = ConversationEvidenceService(db)
     result = service.analyze_conversation(

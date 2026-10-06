@@ -135,6 +135,14 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
                 status_code, response_dict = self.router.handle_bind_conversation(conv_id, body)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/conversations/") and path.endswith("/evidence"):
+            # Format: /v1/conversations/{conversation_id}/evidence
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "conversations" and parts[3] == "evidence":
+                conv_id = parts[2]
+                status_code, response_dict = self.router.handle_analyze_evidence(conv_id, body)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
             status_code, response_dict = self.router.handle_not_found(path)
 

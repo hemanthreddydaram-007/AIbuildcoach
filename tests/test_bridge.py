@@ -620,4 +620,84 @@ def test_bridge_bind_unknown_project_and_conversation(running_bridge_server):
     assert err_body2["error"]["code"] == "CONVERSATION_NOT_FOUND"
 
 
+def test_bridge_evidence_requires_project_binding(running_bridge_server):
+    """Verifies that analyzing evidence for an unbound conversation returns 422 PROJECT_BINDING_REQUIRED."""
+    base_url, db, project = running_bridge_server
+
+    # Ingest conversation without binding
+    capture_env = make_valid_envelope()
+    capture_env["payload"]["project_id"] = None
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/capture",
+            data=json.dumps(capture_env).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        conv_id = json.loads(resp.read().decode("utf-8"))["result"]["conversation_id"]
+
+    # Ensure explicitly unbound
+    db.remove_conversation_binding(conv_id)
+
+    # Attempt to analyze evidence
+    req = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/evidence",
+        data=json.dumps({
+            "protocol": BRIDGE_PROTOCOL_V1,
+            "request_id": "req_ev_test_1",
+            "message_type": "evidence",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert exc.value.code == 422
+    err_body = json.loads(exc.value.read().decode("utf-8"))
+    assert err_body["error"]["code"] == "PROJECT_BINDING_REQUIRED"
+
+
+def test_bridge_evidence_success_when_bound(running_bridge_server):
+    """Verifies that analyzing evidence for a bound conversation succeeds with structured result."""
+    base_url, db, project = running_bridge_server
+
+    # Ingest conversation
+    capture_env = make_valid_envelope()
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/capture",
+            data=json.dumps(capture_env).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        conv_id = json.loads(resp.read().decode("utf-8"))["result"]["conversation_id"]
+
+    # Bind conversation to project
+    db.bind_conversation_to_project(conv_id, project.id)
+
+    # Request evidence analysis
+    req = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/evidence",
+        data=json.dumps({
+            "protocol": BRIDGE_PROTOCOL_V1,
+            "request_id": "req_ev_test_2",
+            "message_type": "evidence",
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["ok"] is True
+        assert data["message_type"] == "evidence_result"
+        assert data["result"]["conversation_id"] == conv_id
+        assert data["result"]["project_id"] == project.id
+        assert "summary" in data["result"]
+        assert "claims" in data["result"]
+
+
+
 

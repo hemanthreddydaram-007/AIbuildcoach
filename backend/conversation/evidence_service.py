@@ -45,6 +45,7 @@ def extract_candidate_paths(content: str) -> List[str]:
     """Extracts explicit, conservative file path references from message text.
     
     Untrusted input is parsed purely for file-path like tokens.
+    Supports path:line or path#Lline tokens (e.g. foo.py:42, bar/baz.ts:120).
     """
     candidates: List[str] = []
     seen: Set[str] = set()
@@ -63,21 +64,26 @@ def extract_candidate_paths(content: str) -> List[str]:
         if re.match(r"^v?\d+(\.\d+)+$", p):
             return
 
+        # Strip line number suffixes like :42 or :123-145 or #L42
+        clean_p = re.sub(r"(?::|#L)\d+(?:-\d+)?$", "", p)
+        if not clean_p or len(clean_p) < 2:
+            return
+
         # Check if it has a file extension or path separators
-        has_slash = "/" in p
-        ext = p.rsplit(".", 1)[-1].lower() if "." in p else ""
+        has_slash = "/" in clean_p
+        ext = clean_p.rsplit(".", 1)[-1].lower() if "." in clean_p else ""
         if has_slash or ext in KNOWN_EXTENSIONS:
-            if p not in seen:
-                seen.add(p)
-                candidates.append(p)
+            if clean_p not in seen:
+                seen.add(clean_p)
+                candidates.append(clean_p)
 
     # 1. Backtick code spans
     for match in re.finditer(r"`([^`\n]+)`", content):
         token = match.group(1).strip()
         add_candidate(token)
 
-    # 2. Path-like tokens in plain text
-    words = re.findall(r"(?:^|\s|[(\[\"'])([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]{1,10})(?:$|\s|[)\]\"',;:!?])", content)
+    # 2. Path-like tokens in plain text (including path:line)
+    words = re.findall(r"(?:^|\s|[(\[\"'])([a-zA-Z0-9_\-\./\\]+\.[a-zA-Z0-9]{1,10}(?::\d+(?:-\d+)?|#L\d+)?)(?:$|\s|[)\]\"',;:!?])", content)
     for w in words:
         add_candidate(w)
 
@@ -109,33 +115,53 @@ class ConversationEvidenceService:
     def analyze_conversation(
         self,
         conversation_id: str,
-        project_id: str,
+        project_id: Optional[str] = None,
     ) -> ConversationEvidenceResult:
-        """Analyzes a conversation against project evidence deterministically."""
+        """Analyzes a conversation against project evidence deterministically.
+        
+        Requires that the conversation is explicitly bound to a registered local project.
+        If unbound, raises ValueError("PROJECT_BINDING_REQUIRED: Conversation must be bound to a project.").
+        """
         # 1. Load conversation
         conversation = self.db.get_conversation(conversation_id)
         if not conversation:
             raise ValueError(f"Conversation not found: {conversation_id}")
 
-        # 2. Load project
-        project = self.db.get_project_by_id(project_id)
-        if not project:
+        # 2. Enforce Project Binding Prerequisite
+        if project_id and not self.db.get_project_by_id(project_id):
             raise ValueError(f"Project not found: {project_id}")
+
+        binding = self.db.get_conversation_binding(conversation_id)
+        bound_project_id = binding.project_id if binding else conversation.project_id
+        if not bound_project_id:
+            raise ValueError(f"PROJECT_BINDING_REQUIRED: Conversation '{conversation_id}' is not bound to any project.")
+
+        if project_id and project_id != bound_project_id:
+            raise ValueError(
+                f"PROJECT_BINDING_MISMATCH: Conversation '{conversation_id}' is bound to project '{bound_project_id}', not '{project_id}'."
+            )
+
+        target_project_id = bound_project_id
+
+        # 3. Load registered project
+        project = self.db.get_project_by_id(target_project_id)
+        if not project:
+            raise ValueError(f"Project not found: {target_project_id}")
 
         project_root = Path(project.root_path)
 
-        # 3. Load project state & evidence
-        project_files = self.db.get_files_for_project(project_id)
+        # 4. Load project state & evidence
+        project_files = self.db.get_files_for_project(target_project_id)
         files_by_path: Dict[str, ProjectFile] = {f.path: f for f in project_files}
         files_by_name: Dict[str, List[str]] = {}
         for f in project_files:
             name = Path(f.path).name
             files_by_name.setdefault(name, []).append(f.path)
 
-        graph = self.db.get_graph(project_id)
+        graph = self.db.get_graph(target_project_id)
         graph_nodes = graph.nodes if graph else {}
 
-        changeset = self.db.get_latest_change_set(project_id)
+        changeset = self.db.get_latest_change_set(target_project_id)
         file_changes = changeset.file_changes if changeset else []
         changes_by_new_path: Dict[str, FileChange] = {fc.new_path: fc for fc in file_changes if fc.new_path}
         changes_by_old_path: Dict[str, FileChange] = {fc.old_path: fc for fc in file_changes if fc.old_path}
@@ -409,7 +435,7 @@ class ConversationEvidenceService:
 
         return ConversationEvidenceResult(
             conversation_id=conversation_id,
-            project_id=project_id,
+            project_id=target_project_id,
             claims=claims,
             evidence_links=evidence_links,
             summary={

@@ -246,6 +246,112 @@ class BridgeRouter:
             )
             return 500, error_resp.model_dump()
 
+    def handle_analyze_evidence(self, conversation_id: str, raw_body: bytes = b"") -> Tuple[int, Dict[str, Any]]:
+        """Handles POST /v1/conversations/{conversation_id}/evidence."""
+        req_id = f"req_evidence_{conversation_id[:12]}"
+        try:
+            clean_conv_id = validate_conversation_id(conversation_id)
+
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            # Optional body envelope check (can be empty body or envelope with message_type: evidence)
+            if raw_body and raw_body.strip():
+                try:
+                    data = validate_raw_body(raw_body)
+                    if "protocol" in data:
+                        req = validate_request_envelope(data)
+                        req_id = req.request_id
+                        if req.message_type not in ("evidence", "analyze"):
+                            raise BridgeValidationError(
+                                code="UNKNOWN_MESSAGE_TYPE",
+                                message=f"Message type '{req.message_type}' cannot be processed on /evidence.",
+                                status_code=400,
+                            )
+                except BridgeValidationError:
+                    raise
+                except Exception:
+                    pass
+
+            # Check conversation exists
+            conv = self.db.get_conversation(clean_conv_id)
+            if not conv:
+                raise BridgeValidationError(
+                    code="CONVERSATION_NOT_FOUND",
+                    message=f"Conversation '{clean_conv_id}' not found.",
+                    status_code=404,
+                )
+
+            # Check binding exists
+            binding = self.db.get_conversation_binding(clean_conv_id)
+            if not binding:
+                raise BridgeValidationError(
+                    code="PROJECT_BINDING_REQUIRED",
+                    message=f"Conversation '{clean_conv_id}' must be bound to a project before analyzing evidence.",
+                    status_code=422,
+                )
+
+            from backend.conversation.evidence_service import ConversationEvidenceService
+            service = ConversationEvidenceService(self.db)
+            analysis_result = service.analyze_conversation(
+                conversation_id=clean_conv_id,
+                project_id=binding.project_id,
+            )
+
+            result_dto = {
+                "conversation_id": analysis_result.conversation_id,
+                "project_id": analysis_result.project_id,
+                "claims_count": len(analysis_result.claims),
+                "evidence_links_count": len(analysis_result.evidence_links),
+                "summary": analysis_result.summary,
+                "claims": [c.model_dump() for c in analysis_result.claims],
+                "evidence_links": [l.model_dump() for l in analysis_result.evidence_links],
+            }
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="evidence_result",
+                result=result_dto,
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            err_msg = str(ve)
+            code = "PROJECT_BINDING_REQUIRED" if "PROJECT_BINDING_REQUIRED" in err_msg else "INVALID_ARGUMENTS"
+            status_code = 422 if "PROJECT_BINDING_REQUIRED" in err_msg else 400
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=code, message=err_msg),
+            )
+            return status_code, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error analyzing evidence.",
+                ),
+            )
+            return 500, error_resp.model_dump()
+
     def handle_capture(self, raw_body: bytes) -> Tuple[int, Dict[str, Any]]:
         """Handles POST /v1/capture with strict envelope and payload validation."""
         req_id = "unknown_request"

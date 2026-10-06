@@ -71,6 +71,16 @@ class BindingStatusResult(BaseModel):
     project: Optional[ProjectSummaryDTO] = None
 
 
+class EvidenceAnalysisResult(BaseModel):
+    conversation_id: str
+    project_id: str
+    claims_count: int
+    evidence_links_count: int
+    summary: Dict[str, Any] = Field(default_factory=dict)
+    claims: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_links: List[Dict[str, Any]] = Field(default_factory=list)
+
+
 class BridgeRequest(BaseModel):
     protocol: str
     request_id: str

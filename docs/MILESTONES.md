@@ -157,7 +157,8 @@ Every milestone must strictly execute the following engineering cycle before pro
   - M12.1: Real provider DOM adapters with zero background monitoring, `activeTab` + `scripting` permissions.
   - M12.2: Local Bridge (`buildcoach-bridge-v1` over `127.0.0.1:8765`), dynamic `optional_host_permissions`, re-redaction, and `python -m backend.cli bridge start|status`.
   - M12.3: Project Binding (`conversation_project_bindings` v10 migration), stable project IDs, project registry (`python -m backend.cli project register|list|status`), `GET /v1/projects`, `POST /v1/conversations/{id}/bind`, `GET /v1/conversations/{id}/binding`, and extension popup project picker with skip support.
-- **Gate**: Full local ingestion from extension to SQLite via loopback HTTP with explicit project selection, binding persistence, and fallback to Copy JSON. [Status: COMPLETED]
+  - M12.4: Conversation → Project Evidence: Deterministic evidence generation for bound conversations, `PROJECT_BINDING_REQUIRED` enforcement, `POST /v1/conversations/{id}/evidence`, CLI `conversation evidence <conversation_id>`, and zero LLM calls for evidence creation.
+- **Gate**: Full local ingestion from extension to SQLite via loopback HTTP with explicit project selection, binding persistence, and deterministic project evidence. [Status: COMPLETED]
 
 ---
 

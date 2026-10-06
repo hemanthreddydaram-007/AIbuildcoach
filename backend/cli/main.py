@@ -140,7 +140,13 @@ def build_parser() -> argparse.ArgumentParser:
     # conversation analyze
     analyze_parser = conv_subparsers.add_parser("analyze", parents=[json_parent], help="Analyze conversation against project evidence")
     analyze_parser.add_argument("--conversation-id", type=str, required=True, help="Conversation ID to analyze")
-    analyze_parser.add_argument("--project-id", type=str, default=None, help="Project ID to analyze (defaults to current project)")
+    analyze_parser.add_argument("--project-id", type=str, default=None, help="Project ID to analyze (defaults to bound project)")
+
+    # conversation evidence (M12.4: conversation evidence <conversation_id> or --conversation-id)
+    evidence_parser = conv_subparsers.add_parser("evidence", parents=[json_parent], help="Analyze project-grounded evidence for a bound conversation")
+    evidence_parser.add_argument("pos_conversation_id", nargs="?", default=None, help="Conversation ID to analyze")
+    evidence_parser.add_argument("--conversation-id", type=str, default=None, help="Conversation ID to analyze")
+    evidence_parser.add_argument("--project-id", type=str, default=None, help="Project ID to analyze (defaults to bound project)")
 
     # conversation verify
     verify_parser = conv_subparsers.add_parser("verify", parents=[json_parent], help="Verify a conversation claim using AI Gateway")
@@ -418,14 +424,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                 parser.parse_args(["conversation", "--help"])
             return 2
 
-        if action == "analyze":
-            conversation_id = getattr(args, "conversation_id", None)
-            project_id = getattr(args, "project_id", None) or (project.id if project else None)
+        if action in ("analyze", "evidence"):
+            pos_id = getattr(args, "pos_conversation_id", None)
+            flag_id = getattr(args, "conversation_id", None)
+            conversation_id = pos_id or flag_id
+            project_id = getattr(args, "project_id", None)
             if not conversation_id:
                 if getattr(args, "json", False):
-                    emit_json_error("conversation", "analyze", "MISSING_ARGUMENT", "--conversation-id is required.")
+                    emit_json_error("conversation", action, "MISSING_ARGUMENT", "conversation_id is required.")
                 else:
-                    sys.stderr.write("Error: --conversation-id is required.\n")
+                    sys.stderr.write("Error: conversation_id is required.\n")
                 return 2
 
             try:
@@ -435,15 +443,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                     project_id=project_id,
                 )
                 if getattr(args, "json", False):
-                    emit_json_response("conversation", "analyze", res)
+                    emit_json_response("conversation", action, res)
                 else:
                     print(f"Analyzed conversation {conversation_id}: {res['summary']['total_claims']} claims, {res['summary']['total_links']} links.")
                 return 0
             except Exception as exc:
+                err_msg = str(exc)
+                code = "PROJECT_BINDING_REQUIRED" if "PROJECT_BINDING_REQUIRED" in err_msg else "CONVERSATION_ANALYZE_ERROR"
                 if getattr(args, "json", False):
-                    emit_json_error("conversation", "analyze", "CONVERSATION_ANALYZE_ERROR", str(exc))
+                    emit_json_error("conversation", action, code, err_msg)
                 else:
-                    sys.stderr.write(f"Conversation analyze error: {exc}\n")
+                    sys.stderr.write(f"Conversation {action} error: {exc}\n")
                 return 2
 
         if action == "verify":

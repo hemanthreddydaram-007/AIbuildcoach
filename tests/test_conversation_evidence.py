@@ -686,3 +686,144 @@ def test_cli_conversation_analyze_missing_project(project_with_evidence):
     data = json.loads(raw_output)
     assert data["status"] == "error"
     assert "Project not found" in data["error"]["message"]
+
+
+def test_evidence_requires_project_binding(project_with_evidence):
+    """Verifies that analyzing an unbound conversation raises PROJECT_BINDING_REQUIRED."""
+    db = project_with_evidence["db"]
+
+    conv = Conversation(
+        conversation_id="conv_unbound_m124",
+        provider="CHATGPT",
+        project_id=None,
+        messages=[
+            ConversationMessage(
+                message_id="msg_unbound_1",
+                role=ConversationRole.ASSISTANT,
+                content="I updated auth.py",
+                sequence=1,
+            ),
+        ],
+    )
+    db.save_conversation(conv)
+
+    service = ConversationEvidenceService(db)
+    with pytest.raises(ValueError) as exc:
+        service.analyze_conversation(conv.conversation_id)
+    assert "PROJECT_BINDING_REQUIRED" in str(exc.value)
+
+
+def test_evidence_project_isolation(tmp_path: Path):
+    """Verifies that a conversation bound to Project A never resolves files in Project B."""
+    proj_a_dir = tmp_path / "project_a"
+    proj_a_dir.mkdir()
+    (proj_a_dir / "file_a.py").write_text("print('A')\n", encoding="utf-8")
+
+    proj_b_dir = tmp_path / "project_b"
+    proj_b_dir.mkdir()
+    (proj_b_dir / "secret_b.py").write_text("print('B secret')\n", encoding="utf-8")
+
+    db_path = tmp_path / "isolation.db"
+    db = Database(db_path)
+
+    proj_a = Project(id="prj_a", name="Project A", root_path=str(proj_a_dir.resolve()))
+    proj_b = Project(id="prj_b", name="Project B", root_path=str(proj_b_dir.resolve()))
+    db.upsert_project(proj_a)
+    db.upsert_project(proj_b)
+
+    # Ingest conversation referencing secret_b.py
+    conv = Conversation(
+        conversation_id="conv_cross_project",
+        provider="CLAUDE",
+        messages=[
+            ConversationMessage(
+                message_id="msg_cross_1",
+                role=ConversationRole.ASSISTANT,
+                content="I modified secret_b.py",
+                sequence=1,
+            ),
+        ],
+    )
+    db.save_conversation(conv)
+    db.bind_conversation_to_project(conv.conversation_id, proj_a.id)
+
+    # Analyze against Project A
+    service = ConversationEvidenceService(db)
+    result = service.analyze_conversation(conv.conversation_id)
+
+    assert result.project_id == proj_a.id
+    claim = result.claims[0]
+    # secret_b.py does not exist in Project A, so it must be MISSING / UNSUPPORTED
+    assert claim.status == ClaimStatus.UNSUPPORTED
+    assert any(link.evidence_type == "MISSING_FILE" for link in result.evidence_links)
+
+
+def test_evidence_extracts_path_with_line_numbers(project_with_evidence):
+    """Verifies that references with line numbers like auth.py:42 or test_auth.py#L12 resolve cleanly."""
+    db = project_with_evidence["db"]
+    project = project_with_evidence["project"]
+
+    conv = Conversation(
+        conversation_id="conv_line_numbers",
+        provider="CHATGPT",
+        project_id=project.id,
+        messages=[
+            ConversationMessage(
+                message_id="msg_line_1",
+                role=ConversationRole.ASSISTANT,
+                content="Check out `auth.py:42` and `test_auth.py#L12`.",
+                sequence=1,
+            ),
+        ],
+    )
+    db.save_conversation(conv)
+    db.bind_conversation_to_project(conv.conversation_id, project.id)
+
+    service = ConversationEvidenceService(db)
+    result = service.analyze_conversation(conv.conversation_id)
+
+    claim = result.claims[0]
+    assert "auth.py" in claim.referenced_paths
+    assert "test_auth.py" in claim.referenced_paths
+    assert any(link.evidence_type == "FILE_EXISTENCE" and "auth.py" in link.evidence_id for link in result.evidence_links)
+
+
+def test_cli_conversation_evidence_command(project_with_evidence):
+    """Verifies that 'conversation evidence <conversation_id> --json' works seamlessly with project binding."""
+    db = project_with_evidence["db"]
+    project = project_with_evidence["project"]
+    proj_dir = project_with_evidence["proj_dir"]
+
+    conv = Conversation(
+        conversation_id="conv_cli_ev_cmd",
+        provider="GEMINI",
+        messages=[
+            ConversationMessage(
+                message_id="msg_cli_ev_1",
+                role=ConversationRole.ASSISTANT,
+                content="I updated `auth.py`.",
+                sequence=1,
+            ),
+        ],
+    )
+    db.save_conversation(conv)
+    db.bind_conversation_to_project(conv.conversation_id, project.id)
+
+    buf = io.StringIO()
+    with patch("sys.stdout", buf):
+        rc = main([
+            "--project-root", str(proj_dir),
+            "conversation", "evidence",
+            conv.conversation_id,
+            "--json",
+        ])
+
+    assert rc == 0
+    raw_output = buf.getvalue().strip()
+    data = json.loads(raw_output)
+    assert data["status"] == "success"
+    assert data["command"] == "conversation"
+    assert data["action"] == "evidence"
+    assert data["data"]["result"]["project_id"] == project.id
+    assert data["data"]["summary"]["total_claims"] == 1
+

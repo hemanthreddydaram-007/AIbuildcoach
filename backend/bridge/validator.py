@@ -88,10 +88,10 @@ def validate_request_envelope(data: Dict[str, Any]) -> BridgeRequest:
         )
 
     message_type = data.get("message_type")
-    if message_type not in {"health", "capture", "bind"}:
+    if message_type not in {"health", "capture", "bind", "evidence", "analyze"}:
         raise BridgeValidationError(
             code="UNKNOWN_MESSAGE_TYPE",
-            message=f"Unknown message_type '{message_type}'. Supported: 'health', 'capture', 'bind'.",
+            message=f"Unknown message_type '{message_type}'. Supported: 'health', 'capture', 'bind', 'evidence', 'analyze'.",
             status_code=400,
         )
 

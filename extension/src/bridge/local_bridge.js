@@ -313,3 +313,69 @@ export async function getBindingStatus(conversationId, origin = FIXED_BRIDGE_ORI
   }
 }
 
+/**
+ * Triggers deterministic evidence analysis for a bound conversation via the local bridge.
+ * @param {string} conversationId
+ * @param {string} [origin=FIXED_BRIDGE_ORIGIN]
+ * @returns {Promise<{ok: boolean, result?: object, error?: {code: string, message: string}}>}
+ */
+export async function analyzeEvidence(conversationId, origin = FIXED_BRIDGE_ORIGIN) {
+  const parsed = new URL(origin);
+  if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+    throw new Error(`Security violation: Bridge client will not connect to non-local origin '${origin}'.`);
+  }
+
+  if (!conversationId) {
+    return {
+      ok: false,
+      error: { code: "INVALID_CONVERSATION_ID", message: "Missing conversationId." },
+    };
+  }
+
+  const requestId = `req_ev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const envelope = {
+    protocol: BRIDGE_PROTOCOL_V1,
+    request_id: requestId,
+    message_type: "evidence",
+    timestamp: new Date().toISOString(),
+    payload: { conversation_id: conversationId },
+  };
+
+  const endpoint = `${origin}/v1/conversations/${encodeURIComponent(conversationId)}/evidence`;
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(envelope),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: data.error || {
+          code: "HTTP_ERROR",
+          message: `Bridge returned status ${res.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      result: data.result,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: "BRIDGE_UNAVAILABLE",
+        message: `Could not reach local Build Coach bridge: ${err.message}`,
+      },
+    };
+  }
+}
+
+

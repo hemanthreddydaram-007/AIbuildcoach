@@ -153,6 +153,12 @@ Before any context packet is assembled or cached for future external provider us
 - **Cardinality & Conflict Prevention**: Enforces `1:0..1` active binding cardinality (`conversation_project_bindings` table with `conversation_id UNIQUE`). Rebinding is deterministic and replaces the previous project binding atomically.
 - **Standalone Unbound Usability**: An unbound conversation is stored safely but never automatically treated as project evidence, ensuring no accidental context contamination.
 
+### 5.9 Conversation → Project Evidence Security Model (Milestone 12.4)
+- **Zero LLM Evidence Generation**: Evidence is created 100% deterministically. AI may interpret evidence, but AI may NEVER invent or create evidence. No LLM or external API calls exist in the evidence generation pipeline.
+- **Strict Project Binding Prerequisite**: Generating project evidence requires that the conversation is explicitly bound to a registered project (`PROJECT_BINDING_REQUIRED`). Unbound conversations reject evidence analysis with HTTP `422` or `ValueError`.
+- **Project Boundary Isolation**: When a conversation is bound to Project A, references to paths or files that belong to Project B or outside Project A's root directory are treated strictly as `MISSING` or `OUTSIDE_PROJECT` with `CONTRADICTS` links. Project roots are resolved exclusively from the trusted local registry, never from conversation text or browser inputs.
+- **Passive Data Handling & Sanitization**: Conversation text is treated strictly as passive, untrusted data. Line number suffixes (`path:line`, `#Lline`) are stripped safely without path execution or arbitrary file resolution. All claim text undergoes secret redaction before evidence record generation.
+
 ---
 
 ## 6. Milestone Security Review Protocol

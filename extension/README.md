@@ -88,6 +88,22 @@ python -m backend.cli project status <project_id>
 3. If preferred, the user can click **Skip for now** — the conversation remains safely stored in SQLite as unbound, and does not contaminate project context until explicitly bound.
 4. Rebinding to another project cleanly updates the binding with `1:0..1` cardinality.
 
+## Evidence Analysis for Bound Conversations (M12.4)
+
+Once a conversation is explicitly bound to a project, project-grounded deterministic evidence can be generated:
+
+```bash
+# Analyze conversation against bound project via CLI
+python -m backend.cli conversation evidence <conversation_id> --json
+```
+
+Or programmatically via the local bridge:
+```http
+POST /v1/conversations/{conversation_id}/evidence
+```
+
+Unbound conversations strictly return `PROJECT_BINDING_REQUIRED` (HTTP `422`). Evidence generation requires zero LLM calls and operates 100% deterministically.
+
 
 ## Running Extension Tests
 

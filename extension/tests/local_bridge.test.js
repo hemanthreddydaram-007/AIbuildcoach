@@ -15,6 +15,7 @@ import {
   listProjects,
   bindConversation,
   getBindingStatus,
+  analyzeEvidence,
 } from "../src/bridge/local_bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -357,5 +358,80 @@ describe("Local Bridge Client Protocol & Security Boundary", () => {
     assert.equal(res.result.bound, true);
     assert.equal(res.result.project.project_id, "prj_alpha");
     assert.equal(res.result.project.display_name, "Alpha Project");
+  });
+
+  test("analyzeEvidence rejects non-local origins", async () => {
+    await assert.rejects(
+      async () => analyzeEvidence("conv_123", "http://malicious.evil.com"),
+      /Security violation: Bridge client will not connect to non-local origin/
+    );
+  });
+
+  test("analyzeEvidence rejects empty conversationId", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return { ok: true };
+    };
+
+    const res = await analyzeEvidence("");
+    assert.equal(res.ok, false);
+    assert.equal(res.error.code, "INVALID_CONVERSATION_ID");
+    assert.equal(called, false);
+  });
+
+  test("analyzeEvidence transmits evidence request and returns structured result", async () => {
+    let capturedBody = null;
+    globalThis.fetch = async (url, opts) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/conversations/conv_456/evidence");
+      assert.equal(opts.method, "POST");
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          request_id: capturedBody.request_id,
+          ok: true,
+          message_type: "evidence_result",
+          result: {
+            conversation_id: "conv_456",
+            project_id: "proj_beta",
+            claims_count: 2,
+            evidence_links_count: 4,
+            summary: { total_claims: 2, total_links: 4 },
+            claims: [{ claim_id: "claim_1", status: "SUPPORTED" }],
+            evidence_links: [{ link_id: "link_1", relation: "SUPPORTS" }],
+          },
+        }),
+      };
+    };
+
+    const res = await analyzeEvidence("conv_456");
+    assert.equal(res.ok, true);
+    assert.equal(capturedBody.protocol, BRIDGE_PROTOCOL_V1);
+    assert.equal(capturedBody.message_type, "evidence");
+    assert.equal(res.result.conversation_id, "conv_456");
+    assert.equal(res.result.project_id, "proj_beta");
+    assert.equal(res.result.claims_count, 2);
+    assert.equal(res.result.evidence_links_count, 4);
+  });
+
+  test("analyzeEvidence handles PROJECT_BINDING_REQUIRED error from bridge", async () => {
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        protocol: BRIDGE_PROTOCOL_V1,
+        ok: false,
+        error: {
+          code: "PROJECT_BINDING_REQUIRED",
+          message: "Conversation must be bound to a project before analyzing evidence.",
+        },
+      }),
+    });
+
+    const res = await analyzeEvidence("conv_unbound");
+    assert.equal(res.ok, false);
+    assert.equal(res.error.code, "PROJECT_BINDING_REQUIRED");
   });
 });
