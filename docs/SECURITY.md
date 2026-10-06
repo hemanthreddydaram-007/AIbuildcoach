@@ -187,6 +187,22 @@ Before any context packet is assembled or cached for future external provider us
 - **Absence of Evidence Invariant**: Absence of failure or lack of observations is never assumed to be healthy (`UNKNOWN` state is enforced when evidence is insufficient).
 - **Minimal Local Bridge Exposure**: `GET /v1/projects/{project_id}/session` operates exclusively over loopback `127.0.0.1:8765` with origin verification, exposing strictly minimal summary DTOs without sensitive paths, raw secrets, or unredacted traces.
 
+### 5.14 Real Developer Activity Capture Security Model (Milestone 12.9)
+- **Explicit User Triggering Only**: Build Coach NEVER executes background surveillance, keylogging, screen recording, or automatic command interception. Commands are only executed when explicitly invoked by the developer via the CLI (`python -m backend.cli run -- <command>`).
+- **No Background / Remote Command Execution**: The system rejects commands from browser extension web contexts, conversation text, or automated LLM instructions. The local bridge does NOT expose a command execution endpoint.
+- **Authoritative Project Root Isolation**: Commands run with working directory locked strictly to the registered project's authoritative root path. Arbitrary or unverified directories are rejected.
+- **Pre-Persistence Redaction & Output Bounding**: Output streams (stdout and stderr) are capped with a bounded maximum size (64 KB default) to prevent disk/memory exhaustion, and unconditionally scrubbed of API keys, bearer tokens, passwords, and private keys before persistence or logging.
+- **Controlled Finite Timeouts**: Execution enforces finite timeouts (default 120s) with structured termination handling (`TIMEOUT` status), preventing runaway background processes.
+
+### 5.15 Transparent Terminal Integration Security Model (Milestone 12.10)
+- **Zero Surveillance Guarantee**: Complete prohibition on keylogging, screen capture, global process hooking, or hidden background daemons. Shell tracking operates purely through explicit user-controlled opt-in hooks.
+- **Explicit Enable/Disable Control**: Terminal integration must be explicitly enabled or disabled per project via `python -m backend.cli terminal enable <project_id>` and `python -m backend.cli terminal disable <project_id>`. When disabled, hooks immediately bypass observation capture.
+- **Strict Project Identity & Boundary**: Hooks are pinned strictly to registered project IDs. Cross-project observations, arbitrary filesystem path guessing, and unauthorized repositories are rejected.
+- **Single Execution Invariant**: All hooked commands execute strictly once as regular child processes with real-time console passthrough, ensuring zero process duplication and maintaining terminal transparency.
+- **Pre-Persistence Redaction**: All captured command strings, standard output, and standard error streams are scrubbed by `detect_and_redact` prior to SQLite persistence.
+- **Interactive Session Safety**: Interactive shells, REPLs, and terminal editors (`vim`, `ssh`, `python`) are excluded from stream capture to prevent buffer corruption.
+- **Zero Remote Execution Surface**: The local bridge HTTP service (`127.0.0.1:8765`) does NOT expose terminal hook execution endpoints. Terminal execution remains exclusively under local developer control.
+
 ---
 
 ## 6. Milestone Security Review Protocol

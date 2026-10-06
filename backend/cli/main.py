@@ -240,6 +240,39 @@ def build_parser() -> argparse.ArgumentParser:
     sess_show_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
     sess_show_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
 
+    # 11. run (M12.9)
+    run_parser = subparsers.add_parser("run", parents=[json_parent], help="M12.9: Real Developer Activity Capture runner")
+    run_parser.add_argument("target_project_id", nargs="?", default=None, help="Optional target project ID")
+    run_parser.add_argument("--project-id", type=str, default=None, help="Optional target project ID")
+    run_parser.add_argument("--timeout", type=float, default=None, help="Command execution timeout in seconds")
+
+    # 12. terminal (M12.10)
+    terminal_parser = subparsers.add_parser("terminal", parents=[json_parent], help="M12.10: Transparent Terminal Integration")
+    term_subparsers = terminal_parser.add_subparsers(dest="terminal_action", help="Terminal actions: enable, disable, status, hook")
+
+    # terminal enable [project_id] [--shell powershell]
+    term_enable_parser = term_subparsers.add_parser("enable", parents=[json_parent], help="Enable transparent terminal integration")
+    term_enable_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    term_enable_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+    term_enable_parser.add_argument("--shell", type=str, default="powershell", help="Shell type (powershell, bash, zsh)")
+
+    # terminal disable [project_id]
+    term_disable_parser = term_subparsers.add_parser("disable", parents=[json_parent], help="Disable transparent terminal integration")
+    term_disable_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    term_disable_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
+    # terminal status [project_id]
+    term_status_parser = term_subparsers.add_parser("status", parents=[json_parent], help="Show terminal integration status")
+    term_status_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    term_status_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
+    # terminal hook [project_id] -- <command>
+    term_hook_parser = term_subparsers.add_parser("hook", parents=[json_parent], help="Execute command via terminal hook strictly once")
+    term_hook_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    term_hook_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+    term_hook_parser.add_argument("--session-id", type=str, default=None, help="Terminal session ID")
+    term_hook_parser.add_argument("--timeout", type=float, default=None, help="Command execution timeout in seconds")
+
     return main_parser
 
 
@@ -248,8 +281,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
+    # For 'run' and 'terminal hook' commands: everything after '--' is the command to execute
+    run_cmd_args: List[str] = []
+    has_dash_dash = False
+    parse_argv = list(argv)
+    if ("run" in argv or "hook" in argv) and "--" in argv:
+        dash_idx = argv.index("--")
+        run_cmd_args = argv[dash_idx + 1:]
+        parse_argv = argv[:dash_idx]
+        has_dash_dash = True
+
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(parse_argv)
+    setattr(args, "run_cmd_args", run_cmd_args)
+    setattr(args, "has_dash_dash", has_dash_dash)
 
     # Resolve explicit flags from argv if needed
     project_root_arg = getattr(args, "project_root", None)
@@ -872,7 +917,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 2
 
     # 9. guidance commands (M12.7)
-    elif command == "guidance":
+    elif args.command == "guidance":
         action = getattr(args, "guidance_action", None)
         target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
 
@@ -884,6 +929,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     target_proj_id = active_proj.id
             except Exception:
                 pass
+            if not target_proj_id and project:
+                target_proj_id = project.id
 
         if not target_proj_id:
             if getattr(args, "json", False):
@@ -941,15 +988,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 2
 
     # 10. session (M12.8)
-    if command == "session":
+    elif args.command == "session":
         action = getattr(args, "session_action", None)
         target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
         if not target_proj_id:
-            root = resolve_project_root(args)
-            if root:
-                proj = db.get_project_by_root(str(root))
-                if proj:
-                    target_proj_id = proj.id
+            target_proj_id = project.id
 
         if not target_proj_id:
             if getattr(args, "json", False):
@@ -975,8 +1018,170 @@ def main(argv: Optional[List[str]] = None) -> int:
                     sys.stderr.write(f"Session error: {exc}\n")
                 return 2
 
+    # 11. run (M12.9)
+    elif args.command == "run":
+        # Extract command list from argv after --
+        # The user invokes: python -m backend.cli run [project_id] [--timeout N] [--json] -- <command>
+        cmd_to_run = getattr(args, "run_cmd_args", [])
+        has_dash = getattr(args, "has_dash_dash", False)
+
+        if not has_dash or not cmd_to_run:
+            if getattr(args, "json", False):
+                emit_json_error("run", "execute", "MISSING_COMMAND", "The '--' separator and command to execute are required. Example: python -m backend.cli run -- pytest")
+            else:
+                sys.stderr.write("Error: The '--' separator followed by a command is mandatory.\nExample: python -m backend.cli run -- pytest\n")
+            return 1
+
+        target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
+        # If target_proj_id looks like a flag or '--', treat as None
+        if target_proj_id in ("--", None) or (isinstance(target_proj_id, str) and target_proj_id.startswith("-")):
+            target_proj_id = None
+
+        if not target_proj_id and project:
+            target_proj_id = project.id
+
+        if not target_proj_id:
+            if getattr(args, "json", False):
+                emit_json_error("run", "execute", "MISSING_PROJECT_ID", "Target project ID is required. Pass <project_id> or register project.")
+            else:
+                sys.stderr.write("Error: Target project ID is required. Pass <project_id> or register project.\n")
+            return 1
+
+        timeout_sec = getattr(args, "timeout", None)
+
+        try:
+            from backend.cli.runner import run_execute
+            is_json = getattr(args, "json", False)
+            res = run_execute(
+                db=db,
+                project_id=target_proj_id,
+                command_list=cmd_to_run,
+                timeout_seconds=timeout_sec,
+                passthrough_output=not is_json,
+            )
+
+            if is_json:
+                emit_json_response("run", "execute", res["result"])
+            else:
+                print(res["human_text"])
+            return 0 if res["result"]["exit_code"] == 0 else (res["result"]["exit_code"] or 1)
+        except Exception as exc:
+            if getattr(args, "json", False):
+                emit_json_error("run", "execute", "RUN_ERROR", str(exc))
+            else:
+                sys.stderr.write(f"Run error: {exc}\n")
+            return 2
+
+    # 12. terminal (M12.10)
+    elif args.command == "terminal":
+        action = getattr(args, "terminal_action", None)
+        target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
+        if target_proj_id in ("--", None) or (isinstance(target_proj_id, str) and target_proj_id.startswith("-")):
+            target_proj_id = None
+
+        if not target_proj_id and project:
+            target_proj_id = project.id
+
+        if not target_proj_id:
+            if getattr(args, "json", False):
+                emit_json_error("terminal", action or "unknown", "MISSING_PROJECT_ID", "Target project ID is required.")
+            else:
+                sys.stderr.write("Error: Target project ID is required. Pass <project_id> or register project.\n")
+            return 2
+
+        if action == "enable":
+            shell = getattr(args, "shell", "powershell")
+            try:
+                from backend.cli.runner import run_terminal_enable
+                res = run_terminal_enable(db=db, project_id=target_proj_id, shell_type=shell)
+                if getattr(args, "json", False):
+                    emit_json_response("terminal", "enable", res["status"])
+                else:
+                    print(res["human_text"])
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("terminal", "enable", "TERMINAL_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Terminal error: {exc}\n")
+                return 2
+
+        elif action == "disable":
+            try:
+                from backend.cli.runner import run_terminal_disable
+                res = run_terminal_disable(db=db, project_id=target_proj_id)
+                if getattr(args, "json", False):
+                    emit_json_response("terminal", "disable", res["status"])
+                else:
+                    print(res["human_text"])
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("terminal", "disable", "TERMINAL_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Terminal error: {exc}\n")
+                return 2
+
+        elif action == "status":
+            try:
+                from backend.cli.runner import run_terminal_status
+                res = run_terminal_status(db=db, project_id=target_proj_id)
+                if getattr(args, "json", False):
+                    emit_json_response("terminal", "status", res["status"])
+                else:
+                    print(res["human_text"])
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("terminal", "status", "TERMINAL_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Terminal error: {exc}\n")
+                return 2
+
+        elif action == "hook":
+            cmd_to_run = getattr(args, "run_cmd_args", [])
+            has_dash = getattr(args, "has_dash_dash", False)
+            if not has_dash or not cmd_to_run:
+                if getattr(args, "json", False):
+                    emit_json_error("terminal", "hook", "MISSING_COMMAND", "The '--' separator and command are required.")
+                else:
+                    sys.stderr.write("Error: The '--' separator followed by a command is mandatory.\n")
+                return 1
+
+            session_id = getattr(args, "session_id", None)
+            timeout_sec = getattr(args, "timeout", None)
+
+            try:
+                from backend.cli.runner import run_terminal_hook
+                is_json = getattr(args, "json", False)
+                res = run_terminal_hook(
+                    db=db,
+                    project_id=target_proj_id,
+                    command_list=cmd_to_run,
+                    terminal_session_id=session_id,
+                    timeout_seconds=timeout_sec,
+                    passthrough_output=not is_json,
+                )
+                if is_json:
+                    emit_json_response("terminal", "hook", res)
+                return 0 if res["exit_code"] == 0 else (res["exit_code"] or 1)
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("terminal", "hook", "HOOK_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Hook error: {exc}\n")
+                return 2
+
+        else:
+            if getattr(args, "json", False):
+                emit_json_error("terminal", "none", "INVALID_ARGUMENTS", "Action required: enable, disable, status, or hook.")
+            else:
+                sys.stderr.write("Error: Action required: enable, disable, status, or hook.\n")
+            return 1
+
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
+

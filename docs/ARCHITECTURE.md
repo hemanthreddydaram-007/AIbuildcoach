@@ -547,6 +547,46 @@ Sessions evaluate project state through strict deterministic precedence with **z
 
 ---
 
+## 13. Real Developer Activity Capture (Milestone 12.9)
+
+Milestone 12.9 connects the existing M12.5 observation engine to real developer workflows via an explicit local command runner (`backend/runtime/`):
+
+```
+Developer Command (`python -m backend.cli run -- <command>`)
+                    │
+                    ▼
+          Build Coach Runner Wrapper
+                    │
+                    ▼
+           Process Execution
+    (Working Directory strictly pinned to project root)
+                    │
+                    ▼
+       Structured Observation Engine
+    - COMMAND_STARTED / COMMAND_FINISHED
+    - RUNTIME_ERROR (Normalized error & stack traces)
+    - TEST_STARTED / TEST_FINISHED (pytest, node, jest)
+    - Bounded terminal output & secret redaction
+                    │
+                    ▼
+          Existing Observation Store (SQLite)
+                    │
+                    ▼
+          Unified Session Refresh (M12.8)
+                    │
+                    ▼
+          Incident Explanation & Guidance Plan
+```
+
+### 13.1 Product Principles & Safety Boundaries
+- **Explicit Triggering**: No desktop surveillance, no background keyloggers, no automatic command interception. The developer explicitly runs commands via `backend.cli run -- <command>`.
+- **Project Root Authority**: Working directory is strictly the registered project's authoritative root path. Commands received from arbitrary browser or conversation text are never executed.
+- **Bounded & Redacted Output**: Outputs are truncated with explicit metadata markers (`output_truncated: true`) to prevent memory/DB bloat, and all sensitive API keys, tokens, and passwords are unconditionally redacted before persistence.
+- **Deterministic Test & Error Adapters**: Automatically normalizes runtime errors (`ModuleNotFoundError`, `SyntaxError`, `KeyError`, `AssertionError`, `HTTP 4xx/5xx`) and test frameworks (`pytest`, `npm test`, `jest`) without LLM calls.
+- **AI-Provider Independence**: Command execution, error detection, and session state recalculation operate 100% offline without requiring internet access or LLM availability.
+
+---
+
 ## 9. Evidence Object Model & Provenance
 
 Every statement presented to the user must be backed by an evidence model:
@@ -613,5 +653,36 @@ ai-build-coach/
 ├── .buildcoach/          # Local runtime directory (ignored by git)
 ├── .gitignore
 ├── README.md
-└── pyproject.toml
 ```
+
+---
+
+## 10. Milestone 12.10: Transparent Terminal Integration
+
+Milestone 12.10 reduces friction from command wrappers (`python -m backend.cli run -- <cmd>`) by allowing developers to work in their standard terminal environments (initially PowerShell) while Build Coach transparently captures execution outcomes into the local observation engine.
+
+### Core Architecture & Boundaries
+
+```
+Developer Shell (PowerShell)
+      ↓ (Invoke-BuildCoachHook)
+python -m backend.cli terminal hook <project_id> -- <cmd>
+      ↓
+Single Execution (RuntimeRunner)
+      ↓
+Deterministic Capture (64 KB bounded, pre-persistence secret scrubbing)
+      ↓
+Deterministic Parsers (parse_test_results, parse_runtime_error)
+      ↓
+ObservationService (COMMAND_STARTED, COMMAND_FINISHED, TEST_FINISHED, RUNTIME_ERROR)
+      ↓
+Unified SessionService (immediate recalculation of SessionState & GuidancePlan)
+```
+
+### Key Safety Invariants
+1. **Zero Surveillance**: Absolute avoidance of keylogging, screen recording, global process hooking, or hidden background daemons. Integration is strictly project-scoped and explicitly enabled/disabled per project via `python -m backend.cli terminal [enable|disable|status]`.
+2. **Single Execution**: Commands execute strictly once via standard child process invocation; stdout and stderr stream directly to the terminal so developer interactive experience is unimpaired.
+3. **Secret Redaction**: All commands, stdout, and stderr are scrubbed by `detect_and_redact` before storage in SQLite (`state.db`).
+4. **Interactive Command Preservation**: Interactive REPLs and TUIs (`vim`, `ssh`, Python REPL) are detected and excluded from stream capture to prevent terminal corruption.
+5. **Session Refresh**: Terminal test failures and errors immediately update the unified Build Coach session state and retire or generate verified next actions.
+

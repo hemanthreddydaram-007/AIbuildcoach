@@ -84,20 +84,22 @@ def compute_session_state(
             last_runtime_error = e
             break
 
-    last_test_or_http = None
+    last_success = None
     for e in reversed(sorted_events):
-        if e.event_type in (ObservationEventType.TEST_FINISHED, ObservationEventType.HTTP_RESPONSE):
-            last_test_or_http = e
+        if (
+            (e.event_type == ObservationEventType.TEST_FINISHED and e.payload.get("status") == "PASSED")
+            or (e.event_type == ObservationEventType.HTTP_RESPONSE and 200 <= e.payload.get("status_code", 0) < 300)
+            or (e.event_type == ObservationEventType.COMMAND_FINISHED and e.payload.get("exit_code") == 0)
+        ):
+            last_success = e
             break
 
-    # An active error is one where runtime error occurred and was not superseded by a clean recovery/pass
+    # An active error is one where runtime error occurred and was not superseded by a clean success
     is_active_unrecovered_error = False
     if last_runtime_error:
-        if not last_test_or_http:
+        if not last_success:
             is_active_unrecovered_error = True
-        elif last_runtime_error.timestamp > last_test_or_http.timestamp:
-            is_active_unrecovered_error = True
-        elif last_test_or_http.event_type == ObservationEventType.TEST_FINISHED and last_test_or_http.payload.get("status") != "PASSED":
+        elif last_runtime_error.timestamp > last_success.timestamp:
             is_active_unrecovered_error = True
 
     if has_persisting_packet or has_investigate_action or has_unresolved_gap or is_active_unrecovered_error:

@@ -155,6 +155,21 @@ class GuidanceService:
             elif action.action_type == ActionType.CHECK_RUNTIME:
                 if packet and packet.fix_status in (FixStatus.VERIFIED, FixStatus.RECOVERED):
                     action.status = ActionStatus.COMPLETED
+                else:
+                    last_err = [e for e in sorted_events if e.event_type == ObservationEventType.RUNTIME_ERROR]
+                    if last_err:
+                        t_err = last_err[-1].timestamp
+                        has_clean_run = any(
+                            e.timestamp > t_err
+                            and (
+                                (e.event_type == ObservationEventType.COMMAND_FINISHED and e.payload.get("exit_code") == 0)
+                                or (e.event_type == ObservationEventType.TEST_FINISHED and e.payload.get("status") == "PASSED")
+                                or (e.event_type == ObservationEventType.HTTP_RESPONSE and 200 <= e.payload.get("status_code", 0) < 300)
+                            )
+                            for e in sorted_events
+                        )
+                        if has_clean_run:
+                            action.status = ActionStatus.COMPLETED
 
             # 3. INVESTIGATE_ERROR: completed if error disappeared or was verified
             elif action.action_type == ActionType.INVESTIGATE_ERROR:

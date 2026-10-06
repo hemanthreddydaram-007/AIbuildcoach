@@ -823,6 +823,159 @@ def run_session_show(
     }
 
 
+def run_execute(
+    db: Database,
+    project_id: str,
+    command_list: List[str],
+    timeout_seconds: Optional[float] = None,
+    passthrough_output: bool = True,
+) -> Dict[str, Any]:
+    """Executes a command through Build Coach runtime runner and records observations (M12.9)."""
+    from backend.runtime.runner import RuntimeRunner, format_human_command_run
+
+    runner = RuntimeRunner(db=db)
+    result = runner.run_command(
+        project_id=project_id,
+        command_list=command_list,
+        timeout_seconds=timeout_seconds,
+        passthrough_output=passthrough_output,
+    )
+    project = db.get_project_by_id(project_id)
+    proj_name = project.name if project else project_id
+
+    return {
+        "result": result.to_dict(),
+        "human_text": format_human_command_run(result, project_name=proj_name),
+    }
+
+
+def run_terminal_enable(
+    db: Database,
+    project_id: str,
+    shell_type: str = "powershell",
+) -> Dict[str, Any]:
+    """Enables transparent terminal integration for a project (M12.10)."""
+    from backend.terminal.integration import TerminalIntegrationManager
+
+    mgr = TerminalIntegrationManager(db)
+    status = mgr.enable(project_id=project_id, shell_type=shell_type)
+    project = db.get_project_by_id(project_id)
+    proj_name = project.name if project else project_id
+
+    human_lines = [
+        f"Terminal integration ENABLED for '{proj_name}' ({project_id})",
+        f"Shell: {status.shell_type}",
+    ]
+    if status.hook_script_path:
+        human_lines.append(f"Hook Script: {status.hook_script_path}")
+        human_lines.append(f"To activate in your current PowerShell session, run:")
+        human_lines.append(f"  . '{status.hook_script_path}'")
+
+    return {
+        "status": status.model_dump(),
+        "human_text": "\n".join(human_lines),
+    }
+
+
+def run_terminal_disable(
+    db: Database,
+    project_id: str,
+) -> Dict[str, Any]:
+    """Disables transparent terminal integration for a project (M12.10)."""
+    from backend.terminal.integration import TerminalIntegrationManager
+
+    mgr = TerminalIntegrationManager(db)
+    status = mgr.disable(project_id=project_id)
+    project = db.get_project_by_id(project_id)
+    proj_name = project.name if project else project_id
+
+    human_lines = [
+        f"Terminal integration DISABLED for '{proj_name}' ({project_id})",
+        "Build Coach will not record commands from terminal hooks until re-enabled.",
+    ]
+
+    return {
+        "status": status.model_dump(),
+        "human_text": "\n".join(human_lines),
+    }
+
+
+def run_terminal_status(
+    db: Database,
+    project_id: str,
+) -> Dict[str, Any]:
+    """Retrieves transparent terminal integration status for a project (M12.10)."""
+    from backend.terminal.integration import TerminalIntegrationManager
+
+    mgr = TerminalIntegrationManager(db)
+    status = mgr.get_status(project_id=project_id)
+    project = db.get_project_by_id(project_id)
+    proj_name = project.name if project else project_id
+
+    state_str = status.status.upper()
+    human_lines = [
+        f"Terminal integration status for '{proj_name}' ({project_id}): {state_str}",
+        f"Shell: {status.shell_type}",
+    ]
+    if status.hook_script_path:
+        human_lines.append(f"Hook Script: {status.hook_script_path}")
+    if status.enabled_at:
+        human_lines.append(f"Enabled At: {status.enabled_at}")
+
+    return {
+        "status": status.model_dump(),
+        "human_text": "\n".join(human_lines),
+    }
+
+
+def run_terminal_hook(
+    db: Database,
+    project_id: str,
+    command_list: List[str],
+    terminal_session_id: Optional[str] = None,
+    timeout_seconds: Optional[float] = None,
+    passthrough_output: bool = True,
+) -> Dict[str, Any]:
+    """Executes a command strictly once and records terminal observations (M12.10)."""
+    from backend.terminal.integration import TerminalIntegrationManager
+    from backend.terminal.protocol import IntegrationStatus
+
+    mgr = TerminalIntegrationManager(db)
+    status = mgr.get_status(project_id)
+
+    # If integration is disabled, run the command cleanly without recording any observation
+    if status.status != IntegrationStatus.ENABLED.value:
+        import subprocess
+        import os
+        project = db.get_project_by_id(project_id)
+        cwd = project.root_path if project else None
+        use_shell = os.name == "nt"
+        proc = subprocess.run(command_list, cwd=cwd, shell=use_shell)
+        return {
+            "recorded": False,
+            "exit_code": proc.returncode,
+            "reason": "Terminal integration is DISABLED.",
+        }
+
+    # If enabled, execute once via RuntimeRunner which passes output to stdout/stderr
+    from backend.runtime.runner import RuntimeRunner
+    runner = RuntimeRunner(db=db)
+    result = runner.run_command(
+        project_id=project_id,
+        command_list=command_list,
+        timeout_seconds=timeout_seconds,
+        passthrough_output=passthrough_output,
+    )
+
+    return {
+        "recorded": True,
+        "exit_code": result.exit_code,
+        "result": result.to_dict(),
+    }
+
+
+
+
 
 
 

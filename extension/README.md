@@ -147,6 +147,53 @@ Returns:
 - **`understanding`**: Whether conceptual understanding is required (`EXPLAIN_BACK`).
 - **`next_action`**: The single highest-priority recommended human action.
 
+## Real Developer Activity Capture (M12.9)
+
+Build Coach observes real developer activities through an explicit local command runner:
+
+```bash
+# Execute project commands through Build Coach
+python -m backend.cli run [project_id] [--timeout SECONDS] [--json] -- <command>
+
+# Examples:
+python -m backend.cli run -- pytest
+python -m backend.cli run -- python app.py
+python -m backend.cli run -- npm test
+```
+
+- **Explicit Local Execution**: Zero background surveillance, keylogging, or screen monitoring. Execution is strictly user-initiated.
+- **Project Root Pinned**: The command executes strictly within the registered project's root directory.
+- **Deterministic Observations**: Generates `COMMAND_STARTED`, `COMMAND_FINISHED`, `RUNTIME_ERROR`, and `TEST_*` observation events automatically.
+- **Secret Redaction & Bounding**: Terminal outputs are capped to 64 KB and scrubbed of API keys, bearer tokens, and credentials before persistence.
+- **Unified Session Integration**: Automatically refreshes the project session state and updates guidance recommendations without requiring AI provider calls.
+
+## Transparent Terminal Integration (M12.10)
+
+To avoid rewriting commands via `python -m backend.cli run -- <cmd>`, developers can enable explicit terminal integration for PowerShell:
+
+```powershell
+# Check terminal integration status
+python -m backend.cli terminal status [project_id]
+
+# Enable terminal integration (generates .buildcoach/terminal/buildcoach.ps1)
+python -m backend.cli terminal enable [project_id]
+
+# Activate in your current shell
+. .buildcoach/terminal/buildcoach.ps1
+
+# Run tracked commands transparently
+bc-run pytest
+bc-run python app.py
+
+# Disable terminal integration anytime
+python -m backend.cli terminal disable [project_id]
+```
+
+- **Zero Surveillance**: NO keylogging, NO screen recording, NO hidden monitoring daemons.
+- **Single Execution**: Commands run strictly once as standard child processes with real-time terminal output streaming.
+- **Pre-Persistence Redaction**: Secrets in commands and output are redacted prior to database storage.
+- **Interactive Safety**: Interactive commands (`vim`, `ssh`, Python REPL) are protected from stream capture.
+
 ## Running Extension Tests
 
 The extension test suite uses Node's built-in zero-dependency test runner:

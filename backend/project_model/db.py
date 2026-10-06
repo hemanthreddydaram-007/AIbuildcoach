@@ -33,6 +33,7 @@ from backend.domain.models import (
     ConversationConsent,
     ConversationProjectBinding,
     BindingSource,
+    utc_now_iso,
 )
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
@@ -2040,6 +2041,137 @@ class Database:
                 "updated_at": r["updated_at"],
                 "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
             }
+        finally:
+            conn.close()
+
+    def upsert_terminal_integration(
+        self,
+        project_id: str,
+        status: str,
+        shell_type: str = "powershell",
+        script_path: Optional[str] = None,
+        enabled_at: Optional[str] = None,
+        disabled_at: Optional[str] = None,
+    ) -> None:
+        """Upserts terminal integration record for a project."""
+        now = utc_now_iso()
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO terminal_integrations (project_id, status, shell_type, script_path, enabled_at, disabled_at, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(project_id) DO UPDATE SET
+                        status = excluded.status,
+                        shell_type = excluded.shell_type,
+                        script_path = excluded.script_path,
+                        enabled_at = COALESCE(excluded.enabled_at, terminal_integrations.enabled_at),
+                        disabled_at = COALESCE(excluded.disabled_at, terminal_integrations.disabled_at),
+                        updated_at = excluded.updated_at
+                    """,
+                    (project_id, status, shell_type, script_path, enabled_at, disabled_at, now, now),
+                )
+        finally:
+            conn.close()
+
+    def get_terminal_integration(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves terminal integration record for a project."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT project_id, status, shell_type, script_path, enabled_at, disabled_at, created_at, updated_at FROM terminal_integrations WHERE project_id = ?",
+                (project_id,),
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            return {
+                "project_id": r["project_id"],
+                "status": r["status"],
+                "shell_type": r["shell_type"],
+                "script_path": r["script_path"],
+                "enabled_at": r["enabled_at"],
+                "disabled_at": r["disabled_at"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+            }
+        finally:
+            conn.close()
+
+    def upsert_terminal_session(
+        self,
+        session_id: str,
+        project_id: str,
+        shell_type: str = "powershell",
+        started_at: Optional[str] = None,
+        last_activity_at: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Upserts an active terminal session record."""
+        now = utc_now_iso()
+        meta_json = json.dumps(metadata) if metadata else None
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO terminal_sessions (session_id, project_id, shell_type, started_at, last_activity_at, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        last_activity_at = excluded.last_activity_at,
+                        metadata_json = COALESCE(excluded.metadata_json, terminal_sessions.metadata_json)
+                    """,
+                    (session_id, project_id, shell_type, started_at or now, last_activity_at or now, meta_json),
+                )
+        finally:
+            conn.close()
+
+    def get_terminal_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves terminal session record by session_id."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, project_id, shell_type, started_at, last_activity_at, metadata_json FROM terminal_sessions WHERE session_id = ?",
+                (session_id,),
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            return {
+                "session_id": r["session_id"],
+                "project_id": r["project_id"],
+                "shell_type": r["shell_type"],
+                "started_at": r["started_at"],
+                "last_activity_at": r["last_activity_at"],
+                "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
+            }
+        finally:
+            conn.close()
+
+    def list_terminal_sessions(self, project_id: str) -> List[Dict[str, Any]]:
+        """Lists all terminal sessions recorded for a project."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, project_id, shell_type, started_at, last_activity_at, metadata_json FROM terminal_sessions WHERE project_id = ? ORDER BY started_at DESC",
+                (project_id,),
+            )
+            rows = cur.fetchall()
+            return [
+                {
+                    "session_id": r["session_id"],
+                    "project_id": r["project_id"],
+                    "shell_type": r["shell_type"],
+                    "started_at": r["started_at"],
+                    "last_activity_at": r["last_activity_at"],
+                    "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
+                }
+                for r in rows
+            ]
         finally:
             conn.close()
 
