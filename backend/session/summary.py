@@ -342,8 +342,17 @@ def format_human_session(session: BuildCoachSession, project_name: str = "") -> 
         inc_title = session.verification_summary.status.capitalize()
     lines.extend(["Latest incident:", inc_title, ""])
 
-    # Status / FixStatus
-    lines.extend(["STATUS:", session.fix_status, ""])
+    # Status / FixStatus (Question 2: Is it fixed?)
+    fix_status_label = session.fix_status
+    if session.fix_status == "RECOVERED":
+        fix_status_label = "RECOVERED (Previous error no longer observed; verification pending)"
+    elif session.fix_status == "VERIFIED":
+        fix_status_label = "VERIFIED (Targeted verification observed passing cleanly)"
+    elif session.fix_status == "PERSISTING":
+        fix_status_label = "PERSISTING (Failure continues to be observed)"
+    elif session.fix_status == "UNKNOWN":
+        fix_status_label = "UNKNOWN (Insufficient observation data)"
+    lines.extend(["STATUS (IS IT FIXED?):", fix_status_label, ""])
 
     # What Happened?
     lines.extend(["WHAT HAPPENED?", session.what_happened or "No active incidents detected.", ""])
