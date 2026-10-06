@@ -301,9 +301,9 @@ def test_schema_migration_v10_preserves_existing_data(tmp_path: Path):
         )
     conn.close()
 
-    # Now open with Database class (which runs migrations up to v10)
+    # Now open with Database class (which runs migrations up to latest version)
     db = Database(db_file)
-    assert db.get_schema_version() == 10
+    assert db.get_schema_version() >= 10
 
     # Verify old data survived intact
     p = db.get_project_by_id("p_old")

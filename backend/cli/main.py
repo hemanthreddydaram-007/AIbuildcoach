@@ -184,6 +184,53 @@ def build_parser() -> argparse.ArgumentParser:
     proj_status_parser = project_subparsers.add_parser("status", parents=[json_parent], help="Check status of a registered project")
     proj_status_parser.add_argument("target_project_id", type=str, help="Stable project ID")
 
+    # 8. observation (M12.5)
+    obs_parser = subparsers.add_parser("observation", parents=[json_parent], help="M12.5: Runtime Failure & Change Observation")
+    obs_subparsers = obs_parser.add_subparsers(dest="observation_action", help="Observation actions: timeline, record, explanation")
+
+    # observation timeline <project_id>
+    obs_tl_parser = obs_subparsers.add_parser("timeline", parents=[json_parent], help="Retrieve chronological observation timeline")
+    obs_tl_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    obs_tl_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
+    # observation record <project_id>
+    obs_rec_parser = obs_subparsers.add_parser("record", parents=[json_parent], help="Record an observation event")
+    obs_rec_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    obs_rec_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+    obs_rec_parser.add_argument("--event-type", type=str, required=True, help="Observation event type")
+    obs_rec_parser.add_argument("--source", type=str, default="TERMINAL", help="Observation source (TERMINAL, GIT, PYTEST, HTTP)")
+    obs_rec_parser.add_argument("--payload", type=str, default="{}", help="JSON string of event payload")
+
+    # observation explanation <project_id>
+    obs_exp_parser = obs_subparsers.add_parser("explanation", parents=[json_parent], help="Construct deterministic explanation packet")
+    obs_exp_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    obs_exp_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
+    # observation explain [incident_id] [--project-id ID] [--consent] [--api-key KEY] (M12.6)
+    obs_expl_parser = obs_subparsers.add_parser("explain", parents=[json_parent], help="M12.6: Explain timeline incident")
+    obs_expl_parser.add_argument("incident_id", nargs="?", default=None, help="Incident event ID or error signature to explain")
+    obs_expl_parser.add_argument("--incident-id", dest="opt_incident_id", type=str, default=None, help="Incident ID")
+    obs_expl_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    obs_expl_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+    obs_expl_parser.add_argument("--consent", action="store_true", default=False, help="Grant explicit consent for AI Gateway explanation")
+    obs_expl_parser.add_argument("--api-key", type=str, default=None, help="Optional explicit API key for provider")
+
+    # 9. guidance (M12.7)
+    guidance_parser = subparsers.add_parser("guidance", parents=[json_parent], help="M12.7: Knowledge Gap & Next Action Engine")
+    guidance_subparsers = guidance_parser.add_subparsers(dest="guidance_action", help="Guidance actions: show, incident")
+
+    # guidance show <project_id> [--incident-id ID]
+    guide_show_parser = guidance_subparsers.add_parser("show", parents=[json_parent], help="Show prioritized next actions and gaps for a project")
+    guide_show_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    guide_show_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+    guide_show_parser.add_argument("--incident-id", type=str, default=None, help="Optional incident ID focus")
+
+    # guidance incident <incident_id> [--project-id ID]
+    guide_inc_parser = guidance_subparsers.add_parser("incident", parents=[json_parent], help="Show guidance focused on a specific incident")
+    guide_inc_parser.add_argument("incident_id", type=str, help="Incident ID")
+    guide_inc_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    guide_inc_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
     return main_parser
 
 
@@ -683,6 +730,206 @@ def main(argv: Optional[List[str]] = None) -> int:
             else:
                 sys.stderr.write("Error: Subcommand required for 'project': list, register, status.\n")
             return 1
+
+    # 8. observation (M12.5)
+    elif args.command == "observation":
+        action = getattr(args, "observation_action", None)
+        target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None) or (project.id if project else None)
+
+        if not action:
+            if getattr(args, "json", False):
+                emit_json_error("observation", "none", "INVALID_ARGUMENTS", "Action required: timeline, record, or explanation.")
+            else:
+                sys.stderr.write("Error: Subcommand required for 'observation': timeline, record, explanation.\n")
+            return 1
+
+        if not target_proj_id:
+            if getattr(args, "json", False):
+                emit_json_error("observation", action, "INVALID_ARGUMENTS", "project_id is required.")
+            else:
+                sys.stderr.write("Error: project_id is required for observation commands.\n")
+            return 1
+
+        if action == "timeline":
+            try:
+                from backend.cli.runner import run_observation_timeline
+                res = run_observation_timeline(db=db, project_id=target_proj_id)
+                if getattr(args, "json", False):
+                    emit_json_response("observation", "timeline", res)
+                else:
+                    print(f"Observation Timeline for [{target_proj_id}] ({res['total_events']} events):")
+                    for e in res["events"]:
+                        print(f"  [{e['timestamp']}] {e['event_type']} ({e['source']})")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("observation", "timeline", "OBSERVATION_TIMELINE_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Observation timeline error: {exc}\n")
+                return 2
+
+        elif action == "record":
+            event_type = getattr(args, "event_type", None)
+            source = getattr(args, "source", "TERMINAL")
+            payload_str = getattr(args, "payload", "{}")
+            try:
+                from backend.cli.runner import run_observation_record
+                res = run_observation_record(
+                    db=db,
+                    project_id=target_proj_id,
+                    event_type=event_type,
+                    source=source,
+                    payload_str=payload_str,
+                )
+                if getattr(args, "json", False):
+                    emit_json_response("observation", "record", res)
+                else:
+                    print(f"Recorded {res['event']['event_type']} event [{res['event']['event_id']}].")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("observation", "record", "OBSERVATION_RECORD_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Observation record error: {exc}\n")
+                return 2
+
+        elif action == "explanation":
+            try:
+                from backend.cli.runner import run_observation_explanation
+                res = run_observation_explanation(db=db, project_id=target_proj_id)
+                if getattr(args, "json", False):
+                    emit_json_response("observation", "explanation", res)
+                else:
+                    expl = res["explanation"]
+                    print(f"Explanation for [{target_proj_id}]:")
+                    print(f"  Problem: {expl.get('problem', {}).get('error_kind', 'None')}")
+                    print(f"  Recovery: {expl.get('recovery', {}).get('status', 'None')}")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("observation", "explanation", "OBSERVATION_EXPLANATION_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Observation explanation error: {exc}\n")
+                return 2
+
+        elif action == "explain":
+            inc_id = getattr(args, "opt_incident_id", None) or getattr(args, "incident_id", None)
+            has_consent = getattr(args, "consent", False)
+            api_key = getattr(args, "api_key", None)
+            try:
+                from backend.cli.runner import run_observation_explain
+                res = run_observation_explain(
+                    db=db,
+                    project_id=target_proj_id,
+                    incident_id=inc_id,
+                    has_consent=has_consent,
+                    explicit_api_key=api_key,
+                )
+                if getattr(args, "json", False):
+                    emit_json_response("observation", "explain", res)
+                else:
+                    expl = res["explanation"]
+                    print(f"\nBUILD TIMELINE EXPLANATION [{expl['fix_status']}] (Confidence: {expl['confidence']})")
+                    print(f"Summary: {expl['summary']}\n")
+                    if expl.get("problem"):
+                        print("WHAT HAPPENED (PROBLEM):")
+                        for p in expl["problem"]:
+                            refs = f" [{', '.join(p['evidence_refs'])}]" if p.get("evidence_refs") else ""
+                            print(f"  - {p['statement']}{refs}")
+                    if expl.get("changes"):
+                        print("\nWHAT CHANGED:")
+                        for c in expl["changes"]:
+                            refs = f" [{', '.join(c['evidence_refs'])}]" if c.get("evidence_refs") else ""
+                            print(f"  - {c['statement']}{refs}")
+                    if expl.get("verification"):
+                        print("\nHOW WE KNOW / VERIFICATION:")
+                        for v in expl["verification"]:
+                            refs = f" [{', '.join(v['evidence_refs'])}]" if v.get("evidence_refs") else ""
+                            print(f"  - {v['statement']}{refs}")
+                    if expl.get("what_to_understand"):
+                        print("\nWHAT YOU SHOULD UNDERSTAND:")
+                        for u in expl["what_to_understand"]:
+                            print(f"  - {u}")
+                    if expl.get("unknowns"):
+                        print("\nWHAT REMAINS UNKNOWN:")
+                        for unk in expl["unknowns"]:
+                            print(f"  - {unk}")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("observation", "explain", "OBSERVATION_EXPLAIN_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Observation explain error: {exc}\n")
+                return 2
+
+    # 9. guidance commands (M12.7)
+    elif command == "guidance":
+        action = getattr(args, "guidance_action", None)
+        target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
+
+        if not target_proj_id:
+            # Fall back to active project from working tree
+            try:
+                active_proj = db.get_active_project()
+                if active_proj:
+                    target_proj_id = active_proj.id
+            except Exception:
+                pass
+
+        if not target_proj_id:
+            if getattr(args, "json", False):
+                emit_json_error("guidance", action or "unknown", "MISSING_PROJECT_ID", "Target project ID is required.")
+            else:
+                sys.stderr.write("Error: Target project ID is required. Pass <project_id> or register project.\n")
+            return 2
+
+        if action in ("show", "incident"):
+            inc_id = getattr(args, "incident_id", None)
+            try:
+                from backend.cli.runner import run_guidance_show
+                res = run_guidance_show(db, project_id=target_proj_id, incident_id=inc_id)
+
+                if getattr(args, "json", False):
+                    emit_json_response("guidance", action, res)
+                else:
+                    print(f"\n========================================================")
+                    print(f"BUILD COACH GUIDANCE — PROJECT: {res['project_id']}")
+                    print(f"Status: {res['status']} | Generated: {res['generated_at']}")
+                    print(f"========================================================\n")
+
+                    top = res.get("top_next_action")
+                    if top:
+                        print("TOP NEXT ACTION:")
+                        print(f"  [{top['priority']}] {top['title']} ({top['action_type']})")
+                        print(f"  Description: {top['description']}")
+                        print(f"  Completion Condition: {top['completion_condition']}")
+                        if top.get("evidence_ids"):
+                            print(f"  Grounded Evidence: {', '.join(top['evidence_ids'])}")
+                    else:
+                        print("TOP NEXT ACTION: None (All active verification and knowledge gaps satisfied).")
+
+                    sec = res.get("secondary_actions", [])
+                    if sec:
+                        print("\nSECONDARY ACTIONS:")
+                        for s in sec:
+                            print(f"  - [{s['priority']}] {s['title']} ({s['action_type']})")
+
+                    gaps = res.get("gaps", [])
+                    if gaps:
+                        print("\nIDENTIFIED KNOWLEDGE & VERIFICATION GAPS:")
+                        for g in gaps:
+                            refs = f" [{', '.join(g['evidence_ids'])}]" if g.get("evidence_ids") else ""
+                            print(f"  - [{g['priority']}] {g['category']}: {g['description']}{refs}")
+                            print(f"    Why: {g['reason']}")
+
+                    print()
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("guidance", action, "GUIDANCE_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Guidance error: {exc}\n")
+                return 2
 
     return 0
 

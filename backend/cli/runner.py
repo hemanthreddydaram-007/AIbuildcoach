@@ -693,4 +693,117 @@ def run_project_status(db: Database, project_id: str) -> Dict[str, Any]:
     }
 
 
+def run_observation_timeline(
+    db: Database,
+    project_id: str,
+    limit: int = 1000,
+) -> Dict[str, Any]:
+    """Retrieves chronological observation timeline for a project."""
+    from backend.observation.service import ObservationService
+
+    service = ObservationService(db)
+    events = service.get_timeline(project_id=project_id, limit=limit)
+    return {
+        "project_id": project_id,
+        "total_events": len(events),
+        "events": [e.model_dump() for e in events],
+    }
+
+
+def run_observation_record(
+    db: Database,
+    project_id: str,
+    event_type: str,
+    source: str = "TERMINAL",
+    payload_str: str = "{}",
+) -> Dict[str, Any]:
+    """Records an observation event for a project."""
+    from backend.observation.service import ObservationService
+
+    service = ObservationService(db)
+    try:
+        payload = json.loads(payload_str) if payload_str else {}
+    except Exception as exc:
+        raise ValueError(f"Invalid JSON payload: {exc}")
+
+    event = service.record_event(
+        project_id=project_id,
+        event_type=event_type,
+        source=source,
+        payload=payload,
+        provenance={"source": source, "invoked_by": "cli"},
+    )
+    return {
+        "status": "recorded",
+        "event": event.model_dump(),
+    }
+
+
+def run_observation_explanation(
+    db: Database,
+    project_id: str,
+) -> Dict[str, Any]:
+    """Constructs deterministic explanation packet for a project."""
+    from backend.observation.service import ObservationService
+
+    service = ObservationService(db)
+    packet = service.get_explanation_packet(project_id=project_id)
+    return {
+        "project_id": project_id,
+        "explanation": packet.model_dump(),
+    }
+
+
+def run_observation_explain(
+    db: Database,
+    project_id: str,
+    incident_id: Optional[str] = None,
+    has_consent: bool = False,
+    explicit_api_key: Optional[str] = None,
+    gateway: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Generates structured IncidentExplanation for a specific or latest incident (M12.6)."""
+    from backend.observation.service import ObservationService
+
+    service = ObservationService(db)
+    explanation = service.explain_incident(
+        project_id=project_id,
+        incident_id=incident_id,
+        has_consent=has_consent,
+        explicit_api_key=explicit_api_key,
+        gateway=gateway,
+    )
+    return {
+        "project_id": project_id,
+        "incident_id": incident_id,
+        "explanation": explanation.model_dump(),
+    }
+
+
+def run_guidance_show(
+    db: Database,
+    project_id: str,
+    incident_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Generates or recalculates deterministic guidance plan for a project (M12.7)."""
+    from backend.guidance.service import GuidanceService
+
+    service = GuidanceService(db)
+    plan = service.generate_plan(project_id=project_id, incident_id=incident_id)
+    return {
+        "project_id": project_id,
+        "plan_id": plan.plan_id,
+        "status": plan.status.value,
+        "top_next_action": plan.top_next_action.model_dump() if plan.top_next_action else None,
+        "secondary_actions": [a.model_dump() for a in plan.secondary_actions],
+        "gaps": [g.model_dump() for g in plan.gaps],
+        "total_gaps": len(plan.gaps),
+        "total_actions": len(plan.actions),
+        "generated_at": plan.generated_at,
+    }
+
+
+
+
+
 

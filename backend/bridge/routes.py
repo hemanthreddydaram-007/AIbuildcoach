@@ -352,7 +352,298 @@ class BridgeRouter:
             )
             return 500, error_resp.model_dump()
 
+    def handle_record_observation(self, project_id: str, raw_body: bytes) -> Tuple[int, Dict[str, Any]]:
+        """Handles POST /v1/projects/{project_id}/observations."""
+        req_id = f"req_obs_{project_id[:12]}"
+        try:
+            clean_proj_id = validate_project_id(project_id)
+            data = validate_raw_body(raw_body)
+
+            if "protocol" in data:
+                req = validate_request_envelope(data)
+                req_id = req.request_id
+                payload_dict = req.payload or {}
+            else:
+                payload_dict = data
+
+            event_type = payload_dict.get("event_type")
+            if not event_type:
+                raise BridgeValidationError(
+                    code="MISSING_EVENT_TYPE",
+                    message="Field 'event_type' is required.",
+                    status_code=400,
+                )
+
+            source = payload_dict.get("source", "TERMINAL")
+            event_payload = payload_dict.get("payload", {})
+            provenance = payload_dict.get("provenance", {"source": source})
+            timestamp = payload_dict.get("timestamp")
+
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            from backend.observation.service import ObservationService
+            service = ObservationService(self.db)
+            event = service.record_event(
+                project_id=clean_proj_id,
+                event_type=event_type,
+                source=source,
+                payload=event_payload,
+                provenance=provenance,
+                timestamp=timestamp,
+            )
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="observation_result",
+                result={"event": event.model_dump()},
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code="INVALID_ARGUMENTS", message=str(ve)),
+            )
+            return 400, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error recording observation.",
+                ),
+            )
+            return 500, error_resp.model_dump()
+
+    def handle_get_timeline(self, project_id: str) -> Tuple[int, Dict[str, Any]]:
+        """Handles GET /v1/projects/{project_id}/timeline."""
+        req_id = f"req_tl_{project_id[:12]}"
+        try:
+            clean_proj_id = validate_project_id(project_id)
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            from backend.observation.service import ObservationService
+            service = ObservationService(self.db)
+            events = service.get_timeline(clean_proj_id)
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="timeline_result",
+                result={
+                    "project_id": clean_proj_id,
+                    "total_events": len(events),
+                    "events": [e.model_dump() for e in events],
+                },
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code="INVALID_ARGUMENTS", message=str(ve)),
+            )
+            return 400, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error retrieving timeline.",
+                ),
+            )
+            return 500, error_resp.model_dump()
+
+    def handle_explain_timeline(
+        self,
+        project_id: str,
+        raw_body: bytes = b"",
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Handles POST /v1/projects/{project_id}/explain (M12.6)."""
+        req_id = f"req_expl_{project_id[:12]}"
+        try:
+            clean_proj_id = validate_project_id(project_id)
+            incident_id = None
+            has_consent = False
+            explicit_api_key = None
+
+            if raw_body and raw_body.strip():
+                data = validate_raw_body(raw_body)
+                if "protocol" in data:
+                    req = validate_request_envelope(data)
+                    req_id = req.request_id
+                    payload_dict = req.payload or {}
+                else:
+                    payload_dict = data
+                incident_id = payload_dict.get("incident_id")
+                has_consent = bool(payload_dict.get("has_consent") or payload_dict.get("consent"))
+                explicit_api_key = payload_dict.get("api_key")
+
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            from backend.observation.service import ObservationService
+            service = ObservationService(self.db)
+            explanation = service.explain_incident(
+                project_id=clean_proj_id,
+                incident_id=incident_id,
+                has_consent=has_consent,
+                explicit_api_key=explicit_api_key,
+            )
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="explanation_result",
+                result={"explanation": explanation.model_dump()},
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code="INVALID_ARGUMENTS", message=str(ve)),
+            )
+            return 400, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error explaining timeline incident.",
+                ),
+            )
+    def handle_get_guidance(
+        self,
+        project_id: str,
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Handles GET /v1/projects/{project_id}/guidance (M12.7)."""
+        req_id = f"req_guide_{project_id[:12]}"
+        try:
+            clean_proj_id = validate_project_id(project_id)
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            from backend.guidance.service import GuidanceService
+            service = GuidanceService(self.db)
+            plan = service.generate_plan(project_id=clean_proj_id)
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="guidance_result",
+                result={
+                    "project_id": clean_proj_id,
+                    "plan_id": plan.plan_id,
+                    "status": plan.status.value,
+                    "top_next_action": plan.top_next_action.model_dump() if plan.top_next_action else None,
+                    "secondary_actions": [a.model_dump() for a in plan.secondary_actions],
+                    "total_gaps": len(plan.gaps),
+                    "gaps": [
+                        {
+                            "gap_id": g.gap_id,
+                            "category": g.category.value,
+                            "description": g.description,
+                            "priority": g.priority.value,
+                            "reason": g.reason,
+                            "evidence_ids": g.evidence_ids,
+                        }
+                        for g in plan.gaps
+                    ],
+                    "generated_at": plan.generated_at,
+                },
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code="INVALID_ARGUMENTS", message=str(ve)),
+            )
+            return 400, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error generating guidance.",
+                ),
+            )
+            return 500, error_resp.model_dump()
+
     def handle_capture(self, raw_body: bytes) -> Tuple[int, Dict[str, Any]]:
+
         """Handles POST /v1/capture with strict envelope and payload validation."""
         req_id = "unknown_request"
         try:

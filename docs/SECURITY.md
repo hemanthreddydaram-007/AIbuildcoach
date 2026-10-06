@@ -159,6 +159,27 @@ Before any context packet is assembled or cached for future external provider us
 - **Project Boundary Isolation**: When a conversation is bound to Project A, references to paths or files that belong to Project B or outside Project A's root directory are treated strictly as `MISSING` or `OUTSIDE_PROJECT` with `CONTRADICTS` links. Project roots are resolved exclusively from the trusted local registry, never from conversation text or browser inputs.
 - **Passive Data Handling & Sanitization**: Conversation text is treated strictly as passive, untrusted data. Line number suffixes (`path:line`, `#Lline`) are stripped safely without path execution or arbitrary file resolution. All claim text undergoes secret redaction before evidence record generation.
 
+### 5.10 Runtime Observation Security Model (Milestone 12.5)
+- **Passive Observation Only**: Build Coach never executes project commands, test suites, or processes automatically. It only receives and normalizes observations from explicitly executed actions.
+- **Untrusted Terminal & Error Payloads**: Terminal output, process stdout/stderr, and runtime stack traces are treated as untrusted external text. They are never interpreted as instructions or shell commands.
+- **Mandatory Pre-Persistence Secret Redaction**: All event payloads (command outputs, HTTP headers/bodies, error messages, stack traces) are recursively passed through `detect_and_redact` before being persisted to the SQLite `observation_events` table.
+- **Deterministic ID Generation**: Event IDs and error signatures are derived cryptographically via SHA-256 over canonicalized event properties, preventing collision attacks or database pollution.
+- **Temporal Association vs Causal Claims**: Correlation outputs never assert root causality. All explanation packets include mandatory epistemic disclaimer qualifiers.
+
+### 5.11 Build Timeline Explanation Security Model (Milestone 12.6)
+- **Untrusted Timeline Context Fencing**: All timeline events, error logs, and stack traces supplied to the AI model are enclosed in strict `<untrusted_timeline_evidence>` XML tags. The system prompt instructs the provider to treat all fenced content as passive data to analyze, never executing instructions embedded in errors or commit summaries.
+- **Deterministic Evidence Precedence & Zero-Creation Policy**: The LLM is strictly prohibited from inventing evidence. The deterministic correlator establishes physical facts, events, and correlation links. The LLM only narrates the interpretation.
+- **Strict Evidence Citation Gating**: Before any AI explanation is accepted or displayed, the `TimelineExplanationValidator` checks every factual claim in `problem`, `observed_sequence`, `changes`, and `verification`. Every claim MUST cite real event IDs present in the input packet. Hallucinated IDs or missing citations result in immediate rejection (`NOT_ACCEPTED`) and fallback to deterministic output.
+- **Anti-Causality Enforcement**: Phrasing asserting definitive or sole root cause (e.g. "sole cause", "definitely caused", "bug fixed") is deterministically rejected. The system enforces epistemic humility disclaimers across all outputs.
+- **Zero-Failure Offline & Consent Fallback**: AI explanation requires an explicit `--consent` flag or bridge consent. In the absence of consent, or if the external provider is offline, times out, or fails validation, the system falls back seamlessly to deterministic findings with zero downtime.
+
+### 5.12 Knowledge Gap & Next Action Security Model (Milestone 12.7)
+- **Zero Autonomous Execution**: The guidance engine only recommends actions for humans to review and execute. It NEVER autonomously runs shell commands, writes or edits code files, restarts processes, modifies git working trees, or invokes remote APIs.
+- **Deterministic Gap Derivation**: Knowledge and verification gaps are identified deterministically without LLM calls. Gaps must strictly cite existing canonical evidence IDs; ungrounded gaps are rejected.
+- **Project Boundary Enforcement**: Guidance calculations enforce project isolation. A project's gaps and recommended actions strictly evaluate observations tied to that registered project ID.
+- **Observation-Driven Action Retirement**: Actions are marked COMPLETED strictly when subsequent verified observation events satisfy objective completion conditions, never based on self-reported completion claims.
+- **Strict Local Loopback Bridge Exclosure**: The guidance HTTP bridge endpoint (`GET /v1/projects/{project_id}/guidance`) exposes minimal high-level action DTOs, strictly omitting secrets, internal stack traces, and raw database schemas.
+
 ---
 
 ## 6. Milestone Security Review Protocol

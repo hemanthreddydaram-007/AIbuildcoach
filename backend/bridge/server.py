@@ -86,6 +86,22 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
                 status_code, response_dict = self.router.handle_get_binding(conv_id)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/timeline"):
+            # Format: /v1/projects/{project_id}/timeline
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "timeline":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_get_timeline(proj_id)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/guidance"):
+            # Format: /v1/projects/{project_id}/guidance (M12.7)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "guidance":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_get_guidance(proj_id)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
             status_code, response_dict = self.router.handle_not_found(path)
 
@@ -141,6 +157,22 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[0] == "v1" and parts[1] == "conversations" and parts[3] == "evidence":
                 conv_id = parts[2]
                 status_code, response_dict = self.router.handle_analyze_evidence(conv_id, body)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/observations"):
+            # Format: /v1/projects/{project_id}/observations
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "observations":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_record_observation(proj_id, body)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/explain"):
+            # Format: /v1/projects/{project_id}/explain (M12.6)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "explain":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_explain_timeline(proj_id, body)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
         else:

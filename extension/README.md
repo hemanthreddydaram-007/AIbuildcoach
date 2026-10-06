@@ -104,6 +104,27 @@ POST /v1/conversations/{conversation_id}/evidence
 
 Unbound conversations strictly return `PROJECT_BINDING_REQUIRED` (HTTP `422`). Evidence generation requires zero LLM calls and operates 100% deterministically.
 
+## Knowledge Gap & Next Action Guidance (M12.7)
+
+Build Coach determines the single most useful understanding or verification action for the human to perform next:
+
+```bash
+# Query prioritized next actions and gaps via CLI
+python -m backend.cli guidance show <project_id>
+python -m backend.cli guidance show <project_id> --json
+```
+
+Or query via the local bridge:
+```http
+GET /v1/projects/{project_id}/guidance
+```
+
+Returns:
+- **`top_next_action`**: The single highest-ranked concrete human action (`INVESTIGATE_ERROR`, `RUN_TEST`, `CHECK_RUNTIME`, `EXPLAIN_BACK`, `INSPECT_DIFF`, `READ_FILE`).
+- **`gaps`**: Evidence-grounded knowledge or verification gaps (`UNRESOLVED_ERROR`, `TEST_COVERAGE`, `VERIFICATION`, `UNDERSTANDING`, `CODE_CHANGE_REVIEW`, `DEPENDENCY`).
+- **`status`**: Re-evaluates automatically as new observations arrive.
+- **Human-in-the-Loop**: Build Coach only recommends actions; it never autonomously executes them.
+
 
 ## Running Extension Tests
 

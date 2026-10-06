@@ -699,5 +699,96 @@ def test_bridge_evidence_success_when_bound(running_bridge_server):
         assert "claims" in data["result"]
 
 
+def test_bridge_record_observation_and_timeline(running_bridge_server):
+    """Verifies POST /v1/projects/{project_id}/observations and GET /v1/projects/{project_id}/timeline."""
+    base_url, db, project = running_bridge_server
+
+    # 1. Record an observation via bridge
+    obs_req = urllib.request.Request(
+        f"{base_url}/v1/projects/{project.id}/observations",
+        data=json.dumps({
+            "protocol": BRIDGE_PROTOCOL_V1,
+            "request_id": "req_obs_test_1",
+            "message_type": "observation",
+            "payload": {
+                "event_type": "COMMAND_FINISHED",
+                "source": "TERMINAL",
+                "payload": {"command": "pytest", "exit_code": 0},
+            },
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(obs_req) as resp:
+        assert resp.status == 200
+        res_data = json.loads(resp.read().decode("utf-8"))
+        assert res_data["ok"] is True
+        assert res_data["message_type"] == "observation_result"
+        assert res_data["result"]["event"]["project_id"] == project.id
+        assert res_data["result"]["event"]["event_type"] == "COMMAND_FINISHED"
+
+    # 2. Query timeline via bridge
+    tl_req = urllib.request.Request(
+        f"{base_url}/v1/projects/{project.id}/timeline",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(tl_req) as resp:
+        assert resp.status == 200
+        tl_data = json.loads(resp.read().decode("utf-8"))
+        assert tl_data["ok"] is True
+        assert tl_data["message_type"] == "timeline_result"
+        assert tl_data["result"]["project_id"] == project.id
+        assert tl_data["result"]["total_events"] == 1
+        assert len(tl_data["result"]["events"]) == 1
+
+
+def test_bridge_get_guidance(running_bridge_server):
+    """Verifies GET /v1/projects/{project_id}/guidance returns deterministic guidance."""
+    base_url, db, project = running_bridge_server
+
+    # Record runtime error
+    obs_req = urllib.request.Request(
+        f"{base_url}/v1/projects/{project.id}/observations",
+        data=json.dumps({
+            "protocol": BRIDGE_PROTOCOL_V1,
+            "request_id": "req_obs_err",
+            "message_type": "observation",
+            "payload": {
+                "event_type": "RUNTIME_ERROR",
+                "source": "TERMINAL",
+                "payload": {
+                    "error_kind": "ValueError",
+                    "message": "Invalid configuration",
+                    "file_path": "config.py",
+                    "error_signature": "sig_conf_val",
+                },
+            },
+        }).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(obs_req) as resp:
+        assert resp.status == 200
+
+    # Query guidance via bridge
+    guide_req = urllib.request.Request(
+        f"{base_url}/v1/projects/{project.id}/guidance",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(guide_req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["ok"] is True
+        assert data["message_type"] == "guidance_result"
+        assert data["result"]["project_id"] == project.id
+        assert "plan_id" in data["result"]
+        assert data["result"]["top_next_action"] is not None
+        assert "gaps" in data["result"]
+
+
+
+
 
 

@@ -16,6 +16,7 @@ import {
   bindConversation,
   getBindingStatus,
   analyzeEvidence,
+  getGuidance,
 } from "../src/bridge/local_bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -434,4 +435,42 @@ describe("Local Bridge Client Protocol & Security Boundary", () => {
     assert.equal(res.ok, false);
     assert.equal(res.error.code, "PROJECT_BINDING_REQUIRED");
   });
+
+  test("getGuidance rejects non-local origins", async () => {
+    await assert.rejects(
+      async () => getGuidance("prj_1", "http://evil.com"),
+      /Security violation: Bridge client will not connect to non-local origin/
+    );
+  });
+
+  test("getGuidance rejects empty projectId", async () => {
+    const res = await getGuidance("");
+    assert.equal(res.ok, false);
+    assert.equal(res.error.code, "INVALID_PROJECT_ID");
+  });
+
+  test("getGuidance retrieves guidance result successfully", async () => {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/projects/prj_123/guidance");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          message_type: "guidance_result",
+          result: {
+            project_id: "prj_123",
+            top_next_action: { action_type: "RUN_TEST", priority: "HIGH" },
+            gaps: [{ category: "TEST_COVERAGE" }],
+          },
+        }),
+      };
+    };
+
+    const res = await getGuidance("prj_123");
+    assert.equal(res.ok, true);
+    assert.equal(res.result.project_id, "prj_123");
+    assert.equal(res.result.top_next_action.action_type, "RUN_TEST");
+  });
 });
+

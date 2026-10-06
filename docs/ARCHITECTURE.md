@@ -77,7 +77,30 @@ The Development Context layer is the deterministic, read-only inspection engine 
 
 #### 3. Storage & Schema
 - Persisted relationally in SQLite (`.buildcoach/state.db`) via `migration_v3` across tables `change_sets`, `file_changes`, `diff_hunks`, and `evidence_records` with cascading foreign keys and indexes.
-- Idempotent and deterministic: SHA-256 IDs for ChangeSets, FileChanges, DiffHunks, and EvidenceRecords.
+### Layer 3: Runtime Observation & Correlation Engine (Milestone 12.5)
+
+The Runtime Observation layer provides local, passive observation of project events answering *"What happened locally when AI-built software was changed, executed, tested, failed, fixed, and verified?"*.
+
+#### 1. Core Principles & Boundaries
+- **Observation ≠ Evidence**: An observation is an event timestamped during execution. An evidence record is a verifiable claim component.
+- **Evidence ≠ Causality**: Differentiate temporal sequence from causality. The system never infers causality merely because two events are close in time.
+- **Epistemic Qualification**: When correlating code changes with runtime error disappearances or appearances, the system reports candidate recovery (`ERROR_DISAPPEARED_AFTER_CHANGE`) but explicitly states epistemic unknowns (e.g. *"Build Coach cannot prove the code change was the sole cause"*).
+- **Zero LLM Dependency**: Normalization, error signatures, timeline sequencing, correlation, and explanation packets are 100% deterministic with zero external AI calls.
+- **Passive Safety**: Build Coach never executes commands automatically or runs continuous monitoring daemon loops.
+
+#### 2. Event Types
+Strictly deterministic subset:
+- `GIT_CHANGE`: Working tree / git modifications (files changed, insertions, deletions).
+- `COMMAND_STARTED` / `COMMAND_FINISHED`: Local process or command executions with exit codes and execution durations.
+- `PROCESS_STARTED` / `PROCESS_FINISHED`: Background process lifecycles.
+- `TEST_STARTED` / `TEST_FINISHED`: Test suite executions, pass/fail counts, failed test names.
+- `HTTP_REQUEST` / `HTTP_RESPONSE`: HTTP calls with method, path, status code, response time.
+- `RUNTIME_ERROR`: Exceptions with error kind, message, file path, line number, and stack frames.
+
+#### 3. Correlation Relations
+- `AFFECTS_SAME_FILE`: Event references the same file path as a preceding code change.
+- `SAME_ERROR`: Event shares the exact normalized error signature (`error_kind` + top frame file and line).
+- `ERROR_DISAPPEARED_AFTER_CHANGE`: Temporal candidate recovery where an error occurred, a code change touched relevant files, and subsequent execution/tests succeeded without the error.
 
 ---
 
@@ -356,6 +379,121 @@ To guarantee that browser extensions cannot supply arbitrary filesystem paths or
 - **Binding Cardinality (1:0..1)**: A conversation has zero or one active project binding in `conversation_project_bindings`. Rebinding updates the existing binding atomically.
 - **Separation of Evidence and Existence**: An unbound conversation is stored safely but never constitutes candidate evidence for any project. Only explicit binding establishes a project relationship.
 - **Zero AI Matching**: Project binding is strictly driven by explicit user selection; zero LLM inference or heuristic path guessing.
+
+---
+
+## 9. Runtime Failure & Change Observation (Milestone 12.5)
+
+AI Build Coach captures and correlates local runtime events with code changes and test outcomes:
+- **Normalized Events (`ObservationEvent`)**: Recorded across `GIT`, `TERMINAL`, `PYTEST`, `PROCESS`, and `HTTP`. All payloads undergo secret redaction prior to persistence.
+- **Stable Error Signatures**: Computed deterministically from normalized error kinds, file locations, line numbers, and sanitised messages.
+- **Deterministic Correlation (`ObservationCorrelator`)**: Relates code edits to subsequent runtime failures (`AFFECTS_SAME_FILE`), recurring signatures (`SAME_ERROR`), and subsequent recovery events (`ERROR_DISAPPEARED_AFTER_CHANGE`).
+- **Epistemic Invariant**: Temporal proximity is explicitly acknowledged as non-causal evidence.
+
+---
+
+## 10. Build Timeline Explanation System (Milestone 12.6)
+
+Milestone 12.6 introduces the user-facing educational explanation pipeline that translates raw chronological observations into evidence-grounded narratives:
+
+```
++------------------------------------------------------------------------------------+
+|                       BUILD TIMELINE EXPLANATION PIPELINE                          |
++------------------------------------------------------------------------------------+
+| 1. Observation Events (M12.5 Normalized Event Store)                              |
+|    - Code edits, runtime errors, terminal commands, test outcomes, HTTP responses  |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 2. Focused Incident Window (`ObservationCorrelator.build_incident_explanation_packet`)
+|    - Isolate incident (target error signature) and relevant file changes           |
+|    - Filter out unrelated repo edits                                               |
+|    - Deterministic FixStatus: VERIFIED (targeted tests passed),                    |
+|      RECOVERED (operational recovery/HTTP 2xx), PERSISTING (error recurred),       |
+|      UNKNOWN (no post-change verification)                                         |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 3. Timeline Explanation Packet (`explanation-v1`)                                  |
+|    - packet_id, project_id, incident, timeline, changes, correlations,             |
+|      verification, fix_status, confidence, unknowns                                |
++------------------------------------------------------------------------------------+
+                   │                                          │
+    (Consent + AI Gateway Available)               (Offline / No Consent)
+                   │                                          │
+                   ▼                                          ▼
+| 4. Fenced AI Explanation Engine                 | 5. Zero-Loss Deterministic       |
+|    - <untrusted_timeline_evidence> fencing      |    Fallback Engine               |
+|    - Strict causality prompt constraints        |    - Synthesizes findings solely |
+|    - Response JSON matching schema              |      from packet facts           |
++-------------------------------------------------+----------------------------------+
+                   │                                          │
+                   ▼                                          │
+| 6. Deterministic Groundedness Gate                          │
+|    (`TimelineExplanationValidator.validate_explanation`)    │
+|    - Validates packet_id and project_id match               │
+|    - Asserts EVERY factual statement cites valid event IDs   │
+|    - Rejects ungrounded or hallucinated evidence references │
+|    - Enforces FixStatus consistency                         │
+|    - Rejects forbidden causality language                   │
+|    - Validates preservation of epistemic unknowns           │
++-------------------------------------------------------------+
+                   │
+    [Accepted] ────┴──── [Rejected / Error] ──► Fallback to Deterministic Findings
+                   │
+                   ▼
+| 7. User-Facing Structured Explanation (`IncidentExplanation`)                      |
+|    - summary, problem, observed_sequence, changes, verification,                   |
+|      what_to_understand, unknowns, evidence_refs, ai_generated                     |
++------------------------------------------------------------------------------------+
+```
+
+---
+
+## 11. Knowledge Gap & Next Action Engine (Milestone 12.7)
+
+Milestone 12.7 provides a project-agnostic guidance engine that consumes verified Build Coach context and determines the human's most critical next step for understanding and verification:
+
+```
++------------------------------------------------------------------------------------+
+|                    KNOWLEDGE GAP & NEXT ACTION ENGINE (M12.7)                      |
++------------------------------------------------------------------------------------+
+| Verified Local Context                                                             |
+| - Observation timeline (`ObservationEvent`)                                        |
+| - Incident explanation packet (`explanation-v1`)                                   |
+| - Operational comprehension history (`comprehension_runs`)                         |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 1. Deterministic Gap Detection (`KnowledgeGapDetector.detect_gaps`)                |
+|    - UNRESOLVED_ERROR: Persistent failure recurring post-change                     |
+|    - TEST_COVERAGE: Operational recovery without targeted automated test suite    |
+|    - VERIFICATION: Unverified state after code edits                               |
+|    - CODE_CHANGE_REVIEW: Unreviewed modifications in critical files                |
+|    - UNDERSTANDING: Unexplained architectural mechanism (M7 Can-I-Explain hook)     |
+|    - DEPENDENCY: Unresolved package/module declaration boundary                    |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 2. Candidate Action Planning (`NextActionPlanner.plan_actions`)                     |
+|    - INVESTIGATE_ERROR, RUN_TEST, CHECK_RUNTIME, INSPECT_DIFF,                     |
+|      EXPLAIN_BACK, READ_FILE, DOCUMENT_DECISION                                    |
+|    - Strict completion condition for every candidate action                        |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 3. Deterministic Priority Ranking (`ActionRanker.rank_actions`)                    |
+|    - CRITICAL (active crash) > HIGH (verification) > MEDIUM (understanding/review) |
+|    - Selects `top_next_action` and at most 2 secondary candidate actions           |
++------------------------------------------------------------------------------------+
+                                      │
+                                      ▼
+| 4. Observation Re-evaluation Loop (`GuidanceService.check_plan_staleness`)         |
+|    - Action completion verified from subsequent observable events                  |
+|    - Completed actions retired; guidance plan recalculated upon new events         |
+|    - ZERO autonomous execution: recommends human actions exclusively               |
++------------------------------------------------------------------------------------+
+```
 
 ---
 
