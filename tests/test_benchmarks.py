@@ -19,7 +19,10 @@ from backend.project_model.db import Database
 from backend.context_engine.engine import ContextEngine
 from backend.domain.models import ContextRequest, ContextPurpose
 from backend.project_model.context_detector import ContextDetector
-from tests.fixtures.synthetic_repos import create_large_benchmark_repo
+from tests.fixtures.synthetic_repos import (
+    create_large_benchmark_repo,
+    execute_deterministic_benchmark,
+)
 
 
 def get_system_metadata() -> Dict[str, str]:
@@ -84,19 +87,12 @@ def test_benchmark_in_process_scan_large_repository(large_repo: Path):
 
     scanner = ProjectScanner(project_root=large_repo, db_path=db_path)
 
-    # 3 warm-up runs
-    for _ in range(3):
-        scanner.scan()
+    scan_res, durations_ms, median_duration = execute_deterministic_benchmark(
+        operation=scanner.scan,
+        warmup_count=3,
+        measured_count=5,
+    )
 
-    # 5 measured runs
-    durations_ms: List[float] = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        scan_res = scanner.scan()
-        t1 = time.perf_counter()
-        durations_ms.append((t1 - t0) * 1000.0)
-
-    median_duration = statistics.median(durations_ms)
     sla_target = 1000.0  # 1.0 second
     passed = median_duration < sla_target
 
@@ -130,25 +126,19 @@ def test_benchmark_in_process_graph_construction(large_repo: Path):
         db=db,
     )
 
-    # 1 warm-up run
-    builder.build()
+    graph, durations_ms, median_duration = execute_deterministic_benchmark(
+        operation=builder.build,
+        warmup_count=3,
+        measured_count=5,
+    )
 
-    # 5 measured runs
-    durations_ms: List[float] = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        graph = builder.build()
-        t1 = time.perf_counter()
-        durations_ms.append((t1 - t0) * 1000.0)
-
-    median_duration = statistics.median(durations_ms)
     sla_target = 500.0  # 500 milliseconds
     passed = median_duration < sla_target
 
     report = format_benchmark_report(
         benchmark_name="in_process_graph_construction",
         file_count=len(scan_res.files),
-        warmup_count=1,
+        warmup_count=3,
         measured_count=5,
         measured_durations_ms=durations_ms,
         sla_target_ms=sla_target,
@@ -159,6 +149,36 @@ def test_benchmark_in_process_graph_construction(large_repo: Path):
     assert len(graph.nodes) >= 500
     assert len(durations_ms) == 5
     assert passed, f"in_process_graph_construction SLA violated: median {median_duration:.2f}ms exceeds target {sla_target:.2f}ms"
+
+
+def test_execute_deterministic_benchmark_methodology():
+    """Validates that the shared execute_deterministic_benchmark helper strictly adheres to configured
+    warmup_count and measured_count, executes operation correctly, and calculates median duration accurately."""
+    invocations = 0
+
+    def dummy_op():
+        nonlocal invocations
+        invocations += 1
+        return f"result_step_{invocations}"
+
+    warmup_n = 3
+    measured_n = 5
+    res, durations, median_val = execute_deterministic_benchmark(
+        operation=dummy_op,
+        warmup_count=warmup_n,
+        measured_count=measured_n,
+    )
+
+    # Must call exactly warmup_count + measured_count times
+    assert invocations == warmup_n + measured_n
+    # Must record exactly measured_count durations
+    assert len(durations) == measured_n
+    # Result must be from the final measured invocation
+    assert res == f"result_step_{warmup_n + measured_n}"
+    # Median must match statistics.median of recorded durations
+    assert median_val == statistics.median(durations)
+    for d in durations:
+        assert d >= 0.0
 
 
 def test_benchmark_in_process_context_pipeline(large_repo: Path):

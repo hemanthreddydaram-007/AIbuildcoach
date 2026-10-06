@@ -1,11 +1,14 @@
 /**
- * Popup UI Logic for AI Build Coach Browser Extension.
+ * Popup UI Controller for AI Build Coach Browser Extension.
  *
  * Enforces strictly user-controlled capture and preview-before-transfer invariant:
- * - Nothing is extracted until user clicks "Capture Conversation".
- * - Nothing is transferred until user clicks "Send to Build Coach".
+ * 1. Checks provider compatibility purely via activeTab.url (NO script injection on popup open).
+ * 2. Injects capture script ONLY after user clicks "Capture Conversation" via chrome.scripting.executeScript.
+ * 3. Previews in-memory; discards payload if popup closes or user cancels.
+ * 4. Transfers ONLY after explicit user confirmation ("Send to Build Coach").
  */
 
+import { defaultAdapterFactory } from "../src/adapters/factory.js";
 import { MessageType, createMessage } from "../src/messages.js";
 import { generatePreview, prepareTransferPayload } from "../src/bridge.js";
 
@@ -38,7 +41,7 @@ const contentFirst = document.getElementById("content-first");
 const roleLast = document.getElementById("role-last");
 const contentLast = document.getElementById("content-last");
 
-// In-memory state (NEVER transmitted without explicit user action)
+// Ephemeral in-memory state (NEVER persisted or transferred without confirmation)
 let activeTab = null;
 let currentPayload = null;
 
@@ -72,7 +75,7 @@ function setProviderBadge(provider) {
   }
 }
 
-// 1. Initial status check on popup open
+// 1. Initial status check on popup open (Zero script execution, purely URL based)
 document.addEventListener("DOMContentLoaded", async () => {
   try {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -83,51 +86,53 @@ document.addEventListener("DOMContentLoaded", async () => {
 
     activeTab = tabs[0];
     const url = activeTab.url || "";
+    const adapter = defaultAdapterFactory.getAdapter(url);
 
-    // Send status check to active tab's content script
-    chrome.tabs.sendMessage(
-      activeTab.id,
-      createMessage(MessageType.CHECK_STATUS),
-      (response) => {
-        if (chrome.runtime.lastError || !response || !response.payload?.supported) {
-          setProviderBadge(null);
-          showState(stateUnsupported);
-          return;
-        }
+    if (!adapter) {
+      setProviderBadge(null);
+      showState(stateUnsupported);
+      return;
+    }
 
-        const { provider, title } = response.payload;
-        setProviderBadge(provider);
-        pageTitleEl.textContent = title || activeTab.title || "Provider Conversation";
-        showState(stateReady);
-      }
-    );
+    const provider = adapter.getProvider();
+    setProviderBadge(provider);
+    pageTitleEl.textContent = activeTab.title || `${provider} Conversation`;
+    showState(stateReady);
   } catch (err) {
     showError("Could not inspect active tab: " + err.message);
     showState(stateUnsupported);
   }
 });
 
-// 2. Explicit User Action: Capture Conversation
+// 2. Explicit User Action: Capture Conversation via chrome.scripting.executeScript
 btnCapture.addEventListener("click", async () => {
-  if (!activeTab) return;
+  if (!activeTab || !activeTab.id) return;
 
   showState(stateCapturing);
 
-  chrome.tabs.sendMessage(
-    activeTab.id,
-    createMessage(MessageType.CAPTURE_REQUEST),
-    (response) => {
-      if (chrome.runtime.lastError || !response || !response.success) {
-        showError(response?.error?.message || chrome.runtime.lastError?.message || "Capture failed.");
-        showState(stateReady);
-        return;
-      }
+  try {
+    const [injectionResult] = await chrome.scripting.executeScript({
+      target: { tabId: activeTab.id },
+      files: ["content_script.js"],
+    });
 
-      currentPayload = response.payload.conversation;
-      renderPreview(currentPayload);
-      showState(statePreview);
+    const response = injectionResult?.result;
+    if (!response || !response.success || response.status === "CAPTURE_UNAVAILABLE") {
+      const errMsg =
+        response?.error?.message ||
+        "Conversation capture unavailable: Could not locate active conversation messages on this page.";
+      showError(errMsg);
+      showState(stateReady);
+      return;
     }
-  );
+
+    currentPayload = response.payload.conversation;
+    renderPreview(currentPayload);
+    showState(statePreview);
+  } catch (err) {
+    showError("Failed to execute in-page capture: " + err.message);
+    showState(stateReady);
+  }
 });
 
 // 3. Render Preview In Memory
@@ -174,6 +179,11 @@ btnSend.addEventListener("click", () => {
     (response) => {
       if (chrome.runtime.lastError || !response || !response.success) {
         showError(response?.error?.message || chrome.runtime.lastError?.message || "Transfer failed.");
+        return;
+      }
+
+      if (response.payload?.status === "BRIDGE_NOT_CONNECTED") {
+        showError(response.payload.message || "Local Build Coach bridge is not connected. Use 'Copy JSON' to transfer conversation.");
         return;
       }
 

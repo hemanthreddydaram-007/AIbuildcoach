@@ -8,38 +8,38 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const manifestPath = path.resolve(__dirname, "../manifest.json");
 
-describe("Manifest V3 & Security Boundary Validation", () => {
+describe("Manifest V3 & Refined Permission Boundary Validation", () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
 
   test("manifest_version is 3", () => {
     assert.equal(manifest.manifest_version, 3);
   });
 
-  test("permissions request minimal surface area", () => {
+  test("permissions are strictly minimized to activeTab and scripting", () => {
     const permissions = manifest.permissions || [];
     assert.ok(permissions.includes("activeTab"), "Must include activeTab for user-triggered interaction");
+    assert.ok(permissions.includes("scripting"), "Must include scripting for on-demand in-page execution");
+
+    // Strictly forbidden permissions
     assert.ok(!permissions.includes("cookies"), "Must NEVER request cookies permission");
     assert.ok(!permissions.includes("webRequest"), "Must NEVER request webRequest monitoring");
     assert.ok(!permissions.includes("webNavigation"), "Must NEVER request webNavigation monitoring");
-    assert.ok(!permissions.includes("<all_urls>"), "Must NEVER request all_urls in permissions");
+    assert.ok(!permissions.includes("<all_urls>"), "Must NEVER request all_urls");
     assert.ok(!permissions.includes("tabs"), "Must NOT request broad tabs permission");
   });
 
-  test("host_permissions strictly limited to supported AI providers", () => {
-    const hostPermissions = manifest.host_permissions || [];
-    assert.ok(hostPermissions.length > 0, "Must specify host permissions");
+  test("unnecessary host_permissions are completely absent", () => {
+    assert.ok(
+      !manifest.host_permissions || manifest.host_permissions.length === 0,
+      "host_permissions must be removed to avoid broad install-time warnings"
+    );
+  });
 
-    for (const host of hostPermissions) {
-      const isChatGPT = host.includes("chatgpt.com") || host.includes("chat.openai.com");
-      const isClaude = host.includes("claude.ai");
-      const isGemini = host.includes("gemini.google.com");
-      assert.ok(
-        isChatGPT || isClaude || isGemini,
-        `Host permission ${host} must strictly be ChatGPT, Claude, or Gemini`
-      );
-      assert.notEqual(host, "<all_urls>", "Must never contain <all_urls>");
-      assert.notEqual(host, "*://*/*", "Must never contain wildcard host");
-    }
+  test("static content_scripts are removed in favor of explicit on-demand execution", () => {
+    assert.ok(
+      !manifest.content_scripts || manifest.content_scripts.length === 0,
+      "Static content_scripts must not be registered; capture is purely user-triggered via scripting"
+    );
   });
 
   test("background service worker is configured as ES module", () => {

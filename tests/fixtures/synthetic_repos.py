@@ -2,8 +2,12 @@
 
 import os
 import subprocess
+import time
+import statistics
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable, TypeVar, Tuple, List
+
+T = TypeVar("T")
 
 
 def _init_git(repo: Path) -> None:
@@ -322,3 +326,37 @@ def create_large_benchmark_repo(root: Path, file_count: int = 600) -> Path:
     )
 
     return root
+
+
+def execute_deterministic_benchmark(
+    operation: Callable[[], T],
+    warmup_count: int = 3,
+    measured_count: int = 5,
+) -> Tuple[T, List[float], float]:
+    """Shared deterministic benchmark executor used across performance tests.
+
+    Standardizes warm-up execution to stabilize OS filesystem and database caches,
+    followed by measured runs and median duration calculation.
+
+    Args:
+        operation: Callable returning the benchmark result.
+        warmup_count: Number of unmeasured warm-up runs to stabilize caches.
+        measured_count: Number of measured runs.
+
+    Returns:
+        Tuple of (final_result, durations_ms, median_ms)
+    """
+    for _ in range(warmup_count):
+        operation()
+
+    durations_ms: List[float] = []
+    result: Optional[T] = None
+    for _ in range(measured_count):
+        t0 = time.perf_counter()
+        result = operation()
+        t1 = time.perf_counter()
+        durations_ms.append((t1 - t0) * 1000.0)
+
+    median_ms = statistics.median(durations_ms)
+    assert result is not None, "Benchmark operation produced no result"
+    return result, durations_ms, median_ms

@@ -6,6 +6,11 @@
  * Never scatter provider selectors or scrape logic outside adapter modules.
  */
 
+export const CaptureStatus = {
+  SUCCESS: "SUCCESS",
+  CAPTURE_UNAVAILABLE: "CAPTURE_UNAVAILABLE",
+};
+
 export class ProviderPageAdapter {
   /**
    * Determines whether this adapter can handle the current web page.
@@ -27,12 +32,13 @@ export class ProviderPageAdapter {
 
   /**
    * Captures raw conversation elements from the document.
-   * In M12.0, this is an interface/stub specification. If synthetic test elements
-   * are provided (e.g. via options.syntheticMessages or data attributes), it extracts them cleanly.
+   *
+   * If conversation cannot be confidently identified, must return:
+   * { status: CaptureStatus.CAPTURE_UNAVAILABLE, error: "CAPTURE_UNAVAILABLE", reason: "..." }
    *
    * @param {Document} document
    * @param {object} options
-   * @returns {Promise<{ title: string|null, messages: Array<object>, rawMetadata: object }>}
+   * @returns {Promise<{ status: string, title: string|null, messages: Array<object>, rawMetadata?: object, error?: string, reason?: string }>}
    */
   async captureConversation(document, options = {}) {
     throw new Error("captureConversation() must be implemented by subclass.");
@@ -48,9 +54,18 @@ export class ProviderPageAdapter {
       throw new Error("Cannot normalize invalid or empty captured conversation payload.");
     }
 
+    if (rawCaptured.status === CaptureStatus.CAPTURE_UNAVAILABLE || rawCaptured.error === "CAPTURE_UNAVAILABLE") {
+      return {
+        status: CaptureStatus.CAPTURE_UNAVAILABLE,
+        error: "CAPTURE_UNAVAILABLE",
+        reason: rawCaptured.reason || "Conversation structure could not be identified on page.",
+        provider: this.getProvider(),
+        messages: [],
+      };
+    }
+
     const rawMessages = Array.isArray(rawCaptured.messages) ? rawCaptured.messages : [];
     const normalizedMessages = rawMessages.map((m, index) => {
-      // Validate role strictly
       let role = String(m.role || "").toUpperCase();
       if (role !== "USER" && role !== "ASSISTANT" && role !== "SYSTEM") {
         role = "USER";
@@ -67,6 +82,7 @@ export class ProviderPageAdapter {
     });
 
     return {
+      status: CaptureStatus.SUCCESS,
       provider: this.getProvider(),
       source: "WEB_EXTENSION",
       title: rawCaptured.title || null,

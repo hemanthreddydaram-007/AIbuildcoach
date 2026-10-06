@@ -104,29 +104,29 @@ def test_manifest_version_and_structure(extension_manifest):
 def test_manifest_strict_permissions(extension_manifest):
     """Verifies that the extension requests strictly minimal permissions with zero cookies or background scrapers."""
     permissions = extension_manifest.get("permissions", [])
-    
+
     # Must NOT have broad or intrusive permissions
     assert "cookies" not in permissions, "Security violation: cookies permission is forbidden"
     assert "webRequest" not in permissions, "Security violation: webRequest monitoring is forbidden"
     assert "webNavigation" not in permissions, "Security violation: webNavigation monitoring is forbidden"
     assert "tabs" not in permissions, "Must not request broad tabs permission (only activeTab)"
     assert "<all_urls>" not in permissions, "Must not request <all_urls>"
+    assert "storage" not in permissions, "chrome.storage is not permitted; capture preview is in-memory"
 
-    # Must only contain activeTab and storage
+    # M12.1 strictly requires activeTab and scripting
     assert "activeTab" in permissions
+    assert "scripting" in permissions
+    assert set(permissions) == {"activeTab", "scripting"}
 
 
-def test_manifest_host_permissions_bounded_to_providers(extension_manifest):
-    """Verifies that host_permissions are strictly limited to ChatGPT, Claude, and Gemini."""
-    host_permissions = extension_manifest.get("host_permissions", [])
-    assert len(host_permissions) > 0
-
-    allowed_domains = {"chatgpt.com", "chat.openai.com", "claude.ai", "gemini.google.com"}
-    for host in host_permissions:
-        assert host != "<all_urls>"
-        assert not host.startswith("*://*")
-        domain_match = any(domain in host for domain in allowed_domains)
-        assert domain_match, f"Host permission {host} is outside supported providers"
+def test_manifest_no_host_permissions_or_static_content_scripts(extension_manifest):
+    """Verifies that host_permissions and static content_scripts are completely eliminated in M12.1."""
+    assert "host_permissions" not in extension_manifest or not extension_manifest["host_permissions"], (
+        "M12.1 eliminates persistent host_permissions in favor of on-demand activeTab + scripting"
+    )
+    assert "content_scripts" not in extension_manifest or not extension_manifest["content_scripts"], (
+        "M12.1 eliminates static content_scripts injection in favor of user-triggered scripting.executeScript"
+    )
 
 
 def test_extension_file_structure():

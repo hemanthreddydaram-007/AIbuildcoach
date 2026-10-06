@@ -315,24 +315,30 @@ def test_hypothesis_h7b_performance_sla_conformance(tmp_path: Path):
     from backend.project_model.scanner import ProjectScanner
     from backend.project_model.graph_builder import ProjectGraphBuilder
     from backend.project_model.db import Database
-    from tests.fixtures.synthetic_repos import create_large_benchmark_repo
-    import statistics
-    import time
+    from tests.fixtures.synthetic_repos import (
+        create_large_benchmark_repo,
+        execute_deterministic_benchmark,
+    )
 
     repo = create_large_benchmark_repo(tmp_path / "h7b_perf_500", file_count=600)
 
     scanner = ProjectScanner(repo)
-    # Warm-up run
-    scanner.scan()
 
-    durations = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        scan_res = scanner.scan()
-        durations.append((time.perf_counter() - t0) * 1000.0)
+    scan_res, scan_durations, median_scan = execute_deterministic_benchmark(
+        operation=scanner.scan,
+        warmup_count=3,
+        measured_count=5,
+    )
 
-    median_scan = statistics.median(durations)
     scan_sla_target = 1000.0  # < 1.0s
+    print(
+        f"\n[H7b SCAN BENCHMARK]\n"
+        f"  Fixture file count: {len(scan_res.files)}\n"
+        f"  Warm-up count:      3\n"
+        f"  Measured durations: {[round(d, 2) for d in scan_durations]}\n"
+        f"  Median:             {round(median_scan, 2)}ms\n"
+        f"  SLA target:         {scan_sla_target}ms"
+    )
     assert len(scan_res.files) >= 500, f"Fixture file count must be >= 500, got {len(scan_res.files)}"
     assert median_scan < scan_sla_target, f"H7b Scan SLA violation: Median scan took {median_scan:.2f}ms (target < {scan_sla_target:.2f}ms)"
     assert scan_res.project.id != ""
@@ -340,16 +346,22 @@ def test_hypothesis_h7b_performance_sla_conformance(tmp_path: Path):
     # Graph building SLA: < 500ms
     db = Database(repo / ".buildcoach" / "state.db")
     builder = ProjectGraphBuilder(repo, scan_res.project, scan_res.files, db)
-    builder.build()  # warm-up
 
-    graph_durations = []
-    for _ in range(5):
-        t_graph_0 = time.perf_counter()
-        graph = builder.build()
-        graph_durations.append((time.perf_counter() - t_graph_0) * 1000.0)
+    graph, graph_durations, median_graph = execute_deterministic_benchmark(
+        operation=builder.build,
+        warmup_count=3,
+        measured_count=5,
+    )
 
-    median_graph = statistics.median(graph_durations)
     graph_sla_target = 500.0  # < 500ms
+    print(
+        f"\n[H7b GRAPH BENCHMARK]\n"
+        f"  Graph node count:   {len(graph.nodes)}\n"
+        f"  Warm-up count:      3\n"
+        f"  Measured durations: {[round(d, 2) for d in graph_durations]}\n"
+        f"  Median:             {round(median_graph, 2)}ms\n"
+        f"  SLA target:         {graph_sla_target}ms"
+    )
     assert len(graph.nodes) >= 500
     assert median_graph < graph_sla_target, f"H7b Graph SLA violation: Median graph build took {median_graph:.2f}ms (target < {graph_sla_target:.2f}ms)"
 
