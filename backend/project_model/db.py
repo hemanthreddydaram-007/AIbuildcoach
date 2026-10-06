@@ -5,7 +5,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Set, Tuple
+from typing import Optional, List, Dict, Any, Set, Tuple, Union
 
 from backend.domain.models import (
     Project,
@@ -38,8 +38,8 @@ from backend.project_model.migrations import apply_migrations, get_current_schem
 
 
 class Database:
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
+    def __init__(self, db_path: Union[Path, str]):
+        self.db_path = Path(db_path) if isinstance(db_path, str) else db_path
         self._ensure_parent_dir()
         self.init_schema()
 
@@ -1874,6 +1874,98 @@ class Database:
                     (now, conversation_id),
                 )
                 return deleted
+        finally:
+            conn.close()
+
+    def insert_observation_event(self, event: Any) -> None:
+        """Atomically stores a normalized observation event."""
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO observation_events (
+                        event_id, project_id, event_type, timestamp, source,
+                        payload_json, provenance_json, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(event_id) DO UPDATE SET
+                        payload_json = excluded.payload_json,
+                        provenance_json = excluded.provenance_json
+                    """,
+                    (
+                        event.event_id,
+                        event.project_id,
+                        event.event_type,
+                        event.timestamp,
+                        event.source,
+                        json.dumps(event.payload),
+                        json.dumps(event.provenance),
+                        event.created_at,
+                    ),
+                )
+        finally:
+            conn.close()
+
+    def list_observation_events(
+        self,
+        project_id: str,
+        limit: int = 1000,
+        event_types: Optional[List[str]] = None,
+    ) -> List[Any]:
+        """Retrieves observation events for a project ordered chronologically (timestamp ASC)."""
+        from backend.observation.models import ObservationEvent
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            query = "SELECT * FROM observation_events WHERE project_id = ?"
+            params: List[Any] = [project_id]
+            if event_types:
+                placeholders = ",".join("?" for _ in event_types)
+                query += f" AND event_type IN ({placeholders})"
+                params.extend(event_types)
+            query += " ORDER BY timestamp ASC, created_at ASC LIMIT ?"
+            params.append(limit)
+
+            cur.execute(query, params)
+            rows = cur.fetchall()
+            events = []
+            for r in rows:
+                events.append(
+                    ObservationEvent(
+                        event_id=r["event_id"],
+                        project_id=r["project_id"],
+                        event_type=r["event_type"],
+                        timestamp=r["timestamp"],
+                        source=r["source"],
+                        payload=json.loads(r["payload_json"]) if r["payload_json"] else {},
+                        provenance=json.loads(r["provenance_json"]) if r["provenance_json"] else {},
+                        created_at=r["created_at"],
+                    )
+                )
+            return events
+        finally:
+            conn.close()
+
+    def get_observation_event(self, event_id: str) -> Optional[Any]:
+        """Retrieves a single observation event by ID."""
+        from backend.observation.models import ObservationEvent
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM observation_events WHERE event_id = ?", (event_id,))
+            r = cur.fetchone()
+            if not r:
+                return None
+            return ObservationEvent(
+                event_id=r["event_id"],
+                project_id=r["project_id"],
+                event_type=r["event_type"],
+                timestamp=r["timestamp"],
+                source=r["source"],
+                payload=json.loads(r["payload_json"]) if r["payload_json"] else {},
+                provenance=json.loads(r["provenance_json"]) if r["provenance_json"] else {},
+                created_at=r["created_at"],
+            )
         finally:
             conn.close()
 

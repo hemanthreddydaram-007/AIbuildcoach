@@ -455,6 +455,27 @@ def migration_v10(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_bindings_proj ON conversation_project_bindings(project_id)")
 
 
+def migration_v11(conn: sqlite3.Connection) -> None:
+    """Version 11: Runtime Failure & Change Observation (observation_events)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS observation_events (
+            event_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            source TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            provenance_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_project ON observation_events(project_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_type ON observation_events(event_type)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_ts ON observation_events(timestamp)")
+
+
 def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
     """Ensures conversation bridge tables exist with smallest compatible persistence design."""
     migration_v9(conn)
@@ -472,6 +493,7 @@ MIGRATIONS: List[Migration] = [
     (8, "Viva Defence Engine: viva_sessions, viva_questions, viva_turns, viva_reports", migration_v8),
     (9, "Conversation Bridge Foundation: conversations, conversation_messages, conversation_consents", migration_v9),
     (10, "Conversation-to-Project Binding: conversation_project_bindings", migration_v10),
+    (11, "Runtime Failure & Change Observation: observation_events", migration_v11),
 ]
 
 
