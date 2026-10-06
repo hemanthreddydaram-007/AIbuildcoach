@@ -194,6 +194,22 @@ python -m backend.cli terminal disable [project_id]
 - **Pre-Persistence Redaction**: Secrets in commands and output are redacted prior to database storage.
 - **Interactive Safety**: Interactive commands (`vim`, `ssh`, Python REPL) are protected from stream capture.
 
+## Build Coach Workflow UI (M12.11)
+
+The extension popup includes a unified **Build Coach** tab providing direct visibility into your development lifecycle:
+
+1. **Tab Navigation**: Toggle between conversation `Capture` and `Build Coach`.
+2. **Project Context**: Select any registered project and immediately view its current state.
+3. **Core Workflow Answers (5+1 Questions)**:
+   - **WHAT HAPPENED?**: Plain-language description of recent activity or failure, with one-click expandable timeline details.
+   - **IS IT FIXED?**: Grounded status badges (`VERIFIED`, `RECOVERED`, `PERSISTING`, or `UNKNOWN`).
+   - **HOW DO WE KNOW?**: Checkmarked factual evidence list.
+   - **WHAT IS STILL UNKNOWN?**: Highlighted epistemic limitations and unknowns.
+   - **WHAT SHOULD I DO NEXT?**: Single high-leverage next action.
+   - **DO I UNDERSTAND IT?**: Self-verification / Can-I-Explain status with a quick "Test Understanding" trigger.
+4. **Recent Activity Timeline**: Chronological log of recent commands, test runs, code modifications, and runtime errors.
+5. **Zero Fake Completion**: No synthetic "mark fixed" or "mark understood" buttons. All statuses update purely through observed executions or verified understanding evaluations.
+
 ## Running Extension Tests
 
 The extension test suite uses Node's built-in zero-dependency test runner:
@@ -215,4 +231,5 @@ npm test
 - **"Local bridge is not running"**: Start the bridge via `python -m backend.cli bridge start`.
 - **"Permission to connect to local bridge was denied"**: When Chrome/Edge prompts to allow connection to `http://127.0.0.1`, click Allow, or use "Copy JSON" to export the payload manually.
 - **Port Conflict**: If port 8765 is occupied, run `python -m backend.cli bridge start --port <port>`.
+
 

@@ -686,3 +686,40 @@ Unified SessionService (immediate recalculation of SessionState & GuidancePlan)
 4. **Interactive Command Preservation**: Interactive REPLs and TUIs (`vim`, `ssh`, Python REPL) are detected and excluded from stream capture to prevent terminal corruption.
 5. **Session Refresh**: Terminal test failures and errors immediately update the unified Build Coach session state and retire or generate verified next actions.
 
+---
+
+## 11. Milestone 12.11: Real Developer Workflow
+
+Milestone 12.11 composes the existing Build Coach capabilities into a single practical developer workflow answering the 5+1 core questions without adding new backend intelligence engines:
+
+```
+Developer Workflow
+       ↓
+Normal Development (Build / Test / Edit)
+       ↓
+Automatic Passive Capture (M12.10 Terminal Integration / M12.9 Runner)
+       ↓
+Deterministic Incident Correlation (M12.5) & Explanation (M12.6)
+       ↓
+Epistemic Guidance Engine (M12.7)
+       ↓
+Unified Session (M12.8) & Comprehension Guard (M7)
+       ↓
+Coherent UI Presentation (CLI & Extension Popup)
+```
+
+### The 5+1 Questions Formulation
+1. **WHAT HAPPENED?**: Concise, grounded summary of the incident or project activity, expandable with full evidence chain and timelines.
+2. **IS IT FIXED?**: Grounded deterministic status (`VERIFIED`, `RECOVERED`, `PERSISTING`, or `UNKNOWN`).
+3. **HOW DO WE KNOW?**: Compact list of concrete evidence points (e.g., test results, exit codes, git changes, error disappearances).
+4. **WHAT IS STILL UNKNOWN?**: Unambiguous presentation of epistemic uncertainties, unverified assumptions, and limits of local observation. Never omitted.
+5. **WHAT SHOULD I DO NEXT?**: Single top-priority, high-leverage next action derived deterministically from knowledge gaps and unresolved incidents.
+6. **DO I UNDERSTAND IT?**: Self-verification / comprehension status (Can-I-Explain / Viva evaluation via M7).
+
+### Anti-Goals & Safety Invariants
+- **Zero Fake Completion**: No artificial buttons or endpoints (`[Mark fixed]`, `[Mark test passed]`, `[Mark understood]`). State changes occur strictly via verified observations or comprehension checks.
+- **Strict Determinism**: Zero LLM calls for evidence creation or state determination.
+- **Zero Background Surveillance**: Terminal and observation layers only capture explicitly routed or hooked commands.
+- **Local Bridge Loopback Safety**: Endpoints (`POST /v1/projects/{id}/refresh`, `GET /v1/projects/{id}/understanding`) run exclusively on `127.0.0.1` with strict origin verification.
+
+

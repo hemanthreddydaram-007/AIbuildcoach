@@ -75,6 +75,12 @@ class BuildCoachSession(BaseModel):
     understanding_summary: Optional[UnderstandingSummary] = None
     guidance_summary: Optional[GuidanceSummary] = None
     next_action: Optional[NextAction] = None
+    what_happened: Optional[str] = None
+    fix_status: str = "UNKNOWN"
+    how_do_we_know: List[str] = Field(default_factory=list)
+    evidence_chain: List[Dict[str, Any]] = Field(default_factory=list)
+    recent_activity: List[Dict[str, Any]] = Field(default_factory=list)
+    incident_explanation: Optional[Dict[str, Any]] = None
 
     def to_api_dict(self) -> Dict[str, Any]:
         """Returns the minimal clean DTO contract for local bridge and clients."""
@@ -91,4 +97,10 @@ class BuildCoachSession(BaseModel):
             "active_incident": self.active_incident,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "what_happened": self.what_happened,
+            "fix_status": self.fix_status,
+            "how_do_we_know": self.how_do_we_know,
+            "evidence_chain": self.evidence_chain,
+            "recent_activity": self.recent_activity,
+            "incident_explanation": self.incident_explanation,
         }

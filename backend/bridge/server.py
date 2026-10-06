@@ -110,6 +110,14 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
                 status_code, response_dict = self.router.handle_get_session(proj_id)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/understanding"):
+            # Format: /v1/projects/{project_id}/understanding (M12.11)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "understanding":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_get_understanding(proj_id)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
             status_code, response_dict = self.router.handle_not_found(path)
 
@@ -181,6 +189,14 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
             if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "explain":
                 proj_id = parts[2]
                 status_code, response_dict = self.router.handle_explain_timeline(proj_id, body)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/refresh"):
+            # Format: /v1/projects/{project_id}/refresh (M12.11)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "refresh":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_refresh_session(proj_id)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
         else:

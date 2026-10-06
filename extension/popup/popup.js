@@ -19,6 +19,9 @@ import {
   listProjects,
   bindConversation,
   getBindingStatus,
+  getSession,
+  refreshSession,
+  getUnderstanding,
 } from "../src/bridge/local_bridge.js";
 
 // DOM Elements
@@ -349,4 +352,307 @@ btnCancel.addEventListener("click", () => {
 btnDone.addEventListener("click", () => {
   window.close();
 });
+
+// ============================================================================
+// M12.11 Build Coach Session View Controller
+// ============================================================================
+const tabCapture = document.getElementById("tab-capture");
+const tabSession = document.getElementById("tab-session");
+const containerCapture = document.getElementById("container-capture");
+const viewSession = document.getElementById("view-session");
+const selectSessionProject = document.getElementById("select-session-project");
+const btnRefreshSession = document.getElementById("btn-refresh-session");
+const sessionLoading = document.getElementById("session-loading");
+const sessionEmpty = document.getElementById("session-empty");
+const sessionDetails = document.getElementById("session-details");
+
+const sessStateBadge = document.getElementById("sess-state-badge");
+const sessLatestIncident = document.getElementById("sess-latest-incident");
+const sessFixStatus = document.getElementById("sess-fix-status");
+const sessWhatHappened = document.getElementById("sess-what-happened");
+const btnToggleExplain = document.getElementById("btn-toggle-explain");
+const sessExplainExpanded = document.getElementById("sess-explain-expanded");
+const sessEvidenceList = document.getElementById("sess-evidence-list");
+const sessUnknownsList = document.getElementById("sess-unknowns-list");
+const sessActionPriority = document.getElementById("sess-action-priority");
+const sessActionTitle = document.getElementById("sess-action-title");
+const sessActionWhy = document.getElementById("sess-action-why");
+const sessUndBadge = document.getElementById("sess-und-badge");
+const sessUndDesc = document.getElementById("sess-und-desc");
+const btnStartUnderstand = document.getElementById("btn-start-understand");
+const sessActivityList = document.getElementById("sess-activity-list");
+
+let currentSession = null;
+
+function renderSession(sessionData) {
+  if (!sessionData) return;
+  currentSession = sessionData;
+
+  // State badge
+  if (sessStateBadge) {
+    sessStateBadge.textContent = sessionData.state || "UNKNOWN";
+    sessStateBadge.className = "badge";
+    const st = sessionData.state;
+    if (st === "STABLE") sessStateBadge.style.backgroundColor = "rgba(16, 185, 129, 0.2)";
+    else if (st === "INVESTIGATING") sessStateBadge.style.backgroundColor = "rgba(239, 68, 68, 0.2)";
+    else if (st === "VERIFYING") sessStateBadge.style.backgroundColor = "rgba(245, 158, 11, 0.2)";
+    else if (st === "LEARNING") sessStateBadge.style.backgroundColor = "rgba(139, 92, 246, 0.2)";
+    else sessStateBadge.style.backgroundColor = "rgba(59, 130, 246, 0.2)";
+  }
+
+  // Latest incident
+  if (sessLatestIncident) {
+    const inc = sessionData.active_incident;
+    if (inc) {
+      sessLatestIncident.textContent = inc.error_type || inc.message || "Active Error";
+    } else if (sessionData.verification && sessionData.verification.status !== "UNKNOWN") {
+      sessLatestIncident.textContent = sessionData.verification.status;
+    } else {
+      sessLatestIncident.textContent = "None";
+    }
+  }
+
+  // Status / FixStatus
+  if (sessFixStatus) {
+    sessFixStatus.textContent = sessionData.fix_status || "UNKNOWN";
+  }
+
+  // What Happened?
+  if (sessWhatHappened) {
+    sessWhatHappened.textContent = sessionData.what_happened || "No active incidents detected.";
+  }
+
+  // Expanded explanation details
+  if (sessExplainExpanded) {
+    const exp = sessionData.incident_explanation;
+    if (exp && (exp.problem || exp.observed_sequence || exp.changes)) {
+      let html = "";
+      if (exp.problem && exp.problem.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Problem:</strong><ul style="padding-left: 14px;">${exp.problem.map((p) => `<li>${p.statement || p}</li>`).join("")}</ul></div>`;
+      }
+      if (exp.changes && exp.changes.length > 0) {
+        html += `<div style="margin-bottom: 6px;"><strong>Changes:</strong><ul style="padding-left: 14px;">${exp.changes.map((c) => `<li>${c.statement || c}</li>`).join("")}</ul></div>`;
+      }
+      if (exp.verification && exp.verification.length > 0) {
+        html += `<div><strong>Verification:</strong><ul style="padding-left: 14px;">${exp.verification.map((v) => `<li>${v.statement || v}</li>`).join("")}</ul></div>`;
+      }
+      sessExplainExpanded.innerHTML = html;
+    } else {
+      sessExplainExpanded.textContent = sessionData.what_happened || "No detailed breakdown available.";
+    }
+  }
+
+  // How Do We Know? (Evidence)
+  if (sessEvidenceList) {
+    sessEvidenceList.innerHTML = "";
+    const items = sessionData.how_do_we_know || [];
+    if (items.length > 0) {
+      items.forEach((item) => {
+        const li = document.createElement("li");
+        li.textContent = item.startsWith("✓") ? item : `✓ ${item}`;
+        sessEvidenceList.appendChild(li);
+      });
+    } else {
+      const li = document.createElement("li");
+      li.textContent = "✓ No runtime errors observed.";
+      sessEvidenceList.appendChild(li);
+    }
+  }
+
+  // Still Unknown
+  if (sessUnknownsList) {
+    sessUnknownsList.innerHTML = "";
+    const unknowns = sessionData.summary?.unknowns || [];
+    if (unknowns.length > 0) {
+      unknowns.forEach((u) => {
+        const li = document.createElement("li");
+        li.textContent = `- ${u}`;
+        sessUnknownsList.appendChild(li);
+      });
+    } else {
+      const li = document.createElement("li");
+      li.textContent = "- No critical unknowns recorded.";
+      sessUnknownsList.appendChild(li);
+    }
+  }
+
+  // Next Action
+  if (sessActionTitle && sessActionWhy) {
+    const act = sessionData.next_action;
+    if (act) {
+      sessActionTitle.textContent = act.title;
+      sessActionWhy.textContent = act.description || "";
+      if (sessActionPriority) {
+        sessActionPriority.textContent = act.priority || "NORMAL";
+      }
+    } else {
+      sessActionTitle.textContent = "No immediate action required.";
+      sessActionWhy.textContent = "";
+      if (sessActionPriority) sessActionPriority.textContent = "NONE";
+    }
+  }
+
+  // Do I Understand?
+  if (sessUndBadge && sessUndDesc) {
+    const und = sessionData.understanding;
+    if (und) {
+      if (und.latest_state === "UNDERSTOOD") {
+        sessUndBadge.textContent = "UNDERSTOOD";
+        sessUndBadge.style.backgroundColor = "rgba(16, 185, 129, 0.2)";
+        sessUndDesc.textContent = "Strong comprehension verified.";
+      } else if (und.required) {
+        sessUndBadge.textContent = "REVIEW NEEDED";
+        sessUndBadge.style.backgroundColor = "rgba(245, 158, 11, 0.2)";
+        sessUndDesc.textContent = "Recent changes require conceptual verification.";
+      } else {
+        sessUndBadge.textContent = "PENDING";
+        sessUndBadge.style.backgroundColor = "rgba(148, 163, 184, 0.2)";
+        sessUndDesc.textContent = "Comprehension check available.";
+      }
+    }
+  }
+
+  // Recent Activity
+  if (sessActivityList) {
+    sessActivityList.innerHTML = "";
+    const activities = sessionData.recent_activity || [];
+    if (activities.length > 0) {
+      activities.forEach((act) => {
+        const li = document.createElement("li");
+        const t = act.time_short || (act.timestamp ? act.timestamp.slice(11, 16) : "");
+        li.innerHTML = `<span>${act.summary || act.event_type}</span><span style="color: #64748b; font-size: 10px;">${t}</span>`;
+        sessActivityList.appendChild(li);
+      });
+    } else {
+      const li = document.createElement("li");
+      li.textContent = "No recent activity recorded.";
+      sessActivityList.appendChild(li);
+    }
+  }
+}
+
+async function loadSessionForProject(projectId) {
+  if (!projectId) {
+    sessionDetails.classList.add("hidden");
+    sessionEmpty.classList.remove("hidden");
+    return;
+  }
+  sessionLoading.classList.remove("hidden");
+  sessionEmpty.classList.add("hidden");
+  sessionDetails.classList.add("hidden");
+
+  const res = await getSession(projectId);
+  sessionLoading.classList.add("hidden");
+  if (!res.ok) {
+    showError(res.error?.message || "Could not retrieve Build Coach session.");
+    sessionEmpty.classList.remove("hidden");
+    return;
+  }
+
+  renderSession(res.result);
+  sessionDetails.classList.remove("hidden");
+}
+
+async function initSessionTab() {
+  const perm = await hasLocalPermission();
+  if (!perm) {
+    const granted = await requestLocalPermission();
+    if (!granted) {
+      showError("Local bridge permission required to connect to Build Coach.");
+      return;
+    }
+  }
+
+  const health = await checkConnection();
+  if (!health.connected) {
+    showError("Build Coach is not running.\nStart it locally with: python -m backend.cli bridge start");
+    sessionEmpty.classList.remove("hidden");
+    return;
+  }
+
+  await loadProjectDropdowns();
+  if (selectSessionProject) {
+    selectSessionProject.innerHTML = '<option value="">[ Select Project ▼ ]</option>';
+    cachedProjects.forEach((p) => {
+      const opt = document.createElement("option");
+      opt.value = p.project_id;
+      opt.textContent = `${p.display_name} (${p.project_id})`;
+      selectSessionProject.appendChild(opt);
+    });
+
+    if (cachedProjects.length > 0) {
+      selectSessionProject.value = cachedProjects[0].project_id;
+      await loadSessionForProject(cachedProjects[0].project_id);
+    } else {
+      sessionEmpty.classList.remove("hidden");
+    }
+  }
+}
+
+// Tab click listeners
+if (tabCapture && tabSession) {
+  tabCapture.addEventListener("click", () => {
+    tabCapture.classList.add("active");
+    tabSession.classList.remove("active");
+    containerCapture?.classList.remove("hidden");
+    viewSession?.classList.add("hidden");
+  });
+
+  tabSession.addEventListener("click", async () => {
+    tabSession.classList.add("active");
+    tabCapture.classList.remove("active");
+    containerCapture?.classList.add("hidden");
+    viewSession?.classList.remove("hidden");
+    await initSessionTab();
+  });
+}
+
+if (selectSessionProject) {
+  selectSessionProject.addEventListener("change", async () => {
+    await loadSessionForProject(selectSessionProject.value);
+  });
+}
+
+if (btnRefreshSession) {
+  btnRefreshSession.addEventListener("click", async () => {
+    const projId = selectSessionProject?.value;
+    if (!projId) return;
+    sessionLoading.classList.remove("hidden");
+    const res = await refreshSession(projId);
+    sessionLoading.classList.add("hidden");
+    if (res.ok) {
+      renderSession(res.result);
+    } else {
+      showError(res.error?.message || "Failed to refresh session.");
+    }
+  });
+}
+
+if (btnToggleExplain) {
+  btnToggleExplain.addEventListener("click", () => {
+    if (sessExplainExpanded.classList.contains("hidden")) {
+      sessExplainExpanded.classList.remove("hidden");
+      btnToggleExplain.textContent = "Hide ▲";
+    } else {
+      sessExplainExpanded.classList.add("hidden");
+      btnToggleExplain.textContent = "Details ▼";
+    }
+  });
+}
+
+if (btnStartUnderstand) {
+  btnStartUnderstand.addEventListener("click", async () => {
+    const projId = selectSessionProject?.value;
+    if (!projId) return;
+    const res = await getUnderstanding(projId);
+    if (res.ok && res.result) {
+      if (sessUndDesc) {
+        sessUndDesc.textContent = res.result.overall_state === "UNDERSTOOD"
+          ? "Strong comprehension verified."
+          : `State: ${res.result.overall_state || "Pending"}. Requires explanation.`;
+      }
+    }
+  });
+}
+
 

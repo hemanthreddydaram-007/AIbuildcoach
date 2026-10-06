@@ -17,102 +17,211 @@
       <div id="provider-badge" class="badge badge-unsupported">Checking...</div>
     </header>
 
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button id="tab-capture" class="tab-btn active">Capture</button>
+      <button id="tab-session" class="tab-btn">Build Coach</button>
+    </nav>
+
     <!-- Main Content Area -->
     <main class="content">
-      <!-- State 1: Unsupported Page -->
-      <section id="state-unsupported" class="state-view hidden">
-        <div class="info-card">
-          <p class="info-title">Unsupported Provider Page</p>
-          <p class="info-desc">
-            Navigate to an active conversation on <strong>ChatGPT</strong>, <strong>Claude</strong>, or <strong>Gemini</strong> to capture conversations into AI Build Coach.
-          </p>
-        </div>
-      </section>
+      <div id="container-capture">
+        <!-- State 1: Unsupported Page -->
+        <section id="state-unsupported" class="state-view hidden">
+          <div class="info-card">
+            <p class="info-title">Unsupported Provider Page</p>
+            <p class="info-desc">
+              Navigate to an active conversation on <strong>ChatGPT</strong>, <strong>Claude</strong>, or <strong>Gemini</strong> to capture conversations into AI Build Coach.
+            </p>
+          </div>
+        </section>
 
-      <!-- State 2: Ready to Capture -->
-      <section id="state-ready" class="state-view">
-        <div class="page-info">
-          <p class="label">Current Conversation</p>
-          <p id="page-title" class="title-text">Loading...</p>
-        </div>
+        <!-- State 2: Ready to Capture -->
+        <section id="state-ready" class="state-view">
+          <div class="page-info">
+            <p class="label">Current Conversation</p>
+            <p id="page-title" class="title-text">Loading...</p>
+          </div>
 
-        <button id="btn-capture" class="btn btn-primary">
-          <span class="btn-icon">📥</span> Capture Conversation
-        </button>
-      </section>
+          <button id="btn-capture" class="btn btn-primary">
+            <span class="btn-icon">📥</span> Capture Conversation
+          </button>
+        </section>
 
-      <!-- State 3: Capturing Spinner -->
-      <section id="state-capturing" class="state-view hidden">
-        <div class="spinner-container">
-          <div class="spinner"></div>
-          <p>Extracting conversation & scanning secrets...</p>
-        </div>
-      </section>
+        <!-- State 3: Capturing Spinner -->
+        <section id="state-capturing" class="state-view hidden">
+          <div class="spinner-container">
+            <div class="spinner"></div>
+            <p>Extracting conversation & scanning secrets...</p>
+          </div>
+        </section>
 
-      <!-- State 4: Preview Before Transfer -->
-      <section id="state-preview" class="state-view hidden">
-        <div class="preview-header">
-          <span class="preview-badge" id="preview-provider">PROVIDER</span>
-          <span class="badge badge-secrets" id="preview-secrets">0 Secrets Detected</span>
-        </div>
+        <!-- State 4: Preview Before Transfer -->
+        <section id="state-preview" class="state-view hidden">
+          <div class="preview-header">
+            <span class="preview-badge" id="preview-provider">PROVIDER</span>
+            <span class="badge badge-secrets" id="preview-secrets">0 Secrets Detected</span>
+          </div>
 
-        <div class="preview-card">
-          <h4 id="preview-title" class="preview-title">Conversation Title</h4>
-          <p class="preview-count"><strong id="preview-msg-count">0</strong> messages extracted</p>
+          <div class="preview-card">
+            <h4 id="preview-title" class="preview-title">Conversation Title</h4>
+            <p class="preview-count"><strong id="preview-msg-count">0</strong> messages extracted</p>
 
-          <div class="message-snippets">
-            <div class="snippet-block" id="snippet-first">
-              <span class="snippet-role" id="role-first">USER</span>
-              <p class="snippet-content" id="content-first">—</p>
-            </div>
-            <div class="snippet-block" id="snippet-last">
-              <span class="snippet-role" id="role-last">ASSISTANT</span>
-              <p class="snippet-content" id="content-last">—</p>
+            <div class="message-snippets">
+              <div class="snippet-block" id="snippet-first">
+                <span class="snippet-role" id="role-first">USER</span>
+                <p class="snippet-content" id="content-first">—</p>
+              </div>
+              <div class="snippet-block" id="snippet-last">
+                <span class="snippet-role" id="role-last">ASSISTANT</span>
+                <p class="snippet-content" id="content-last">—</p>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="project-association">
-          <label for="select-project" class="label">Project (Optional):</label>
-          <select id="select-project" class="input-text">
-            <option value="">[ None / Unbound ]</option>
-          </select>
-        </div>
-
-        <div class="action-buttons">
-          <button id="btn-send" class="btn btn-success">
-            <span class="btn-icon">🚀</span> Send to Build Coach
-          </button>
-          <button id="btn-copy-json" class="btn btn-secondary" title="Copy JSON payload to clipboard">
-            📋 Copy JSON
-          </button>
-          <button id="btn-cancel" class="btn btn-outline">
-            Cancel
-          </button>
-        </div>
-      </section>
-
-      <!-- State 5: Transfer Success -->
-      <section id="state-success" class="state-view hidden">
-        <div class="success-card">
-          <span class="success-icon">✅</span>
-          <p class="success-title">Ready in Build Coach!</p>
-          <p class="success-desc" id="success-desc">Conversation was staged with zero background leakage.</p>
-          <div id="binding-status-card" class="info-card" style="margin: 10px 0; text-align: left;">
-            <p class="label">Project Binding:</p>
-            <p id="binding-status-text" class="title-text" style="font-size: 13px;">Not bound</p>
-          </div>
-          <div id="bind-project-section" class="hidden" style="margin-bottom: 12px;">
-            <label for="select-bind-project" class="label">Bind to local project:</label>
-            <select id="select-bind-project" class="input-text" style="margin-bottom: 8px;">
-              <option value="">[ Select a local project ▼ ]</option>
+          <div class="project-association">
+            <label for="select-project" class="label">Project (Optional):</label>
+            <select id="select-project" class="input-text">
+              <option value="">[ None / Unbound ]</option>
             </select>
-            <div style="display: flex; gap: 8px;">
-              <button id="btn-bind-project" class="btn btn-primary" style="flex: 1;">Bind Project</button>
-              <button id="btn-skip-bind" class="btn btn-outline" style="flex: 1;">Skip for now</button>
+          </div>
+
+          <div class="action-buttons">
+            <button id="btn-send" class="btn btn-success">
+              <span class="btn-icon">🚀</span> Send to Build Coach
+            </button>
+            <button id="btn-copy-json" class="btn btn-secondary" title="Copy JSON payload to clipboard">
+              📋 Copy JSON
+            </button>
+            <button id="btn-cancel" class="btn btn-outline">
+              Cancel
+            </button>
+          </div>
+        </section>
+
+        <!-- State 5: Transfer Success -->
+        <section id="state-success" class="state-view hidden">
+          <div class="success-card">
+            <span class="success-icon">✅</span>
+            <p class="success-title">Ready in Build Coach!</p>
+            <p class="success-desc" id="success-desc">Conversation was staged with zero background leakage.</p>
+            <div id="binding-status-card" class="info-card" style="margin: 10px 0; text-align: left;">
+              <p class="label">Project Binding:</p>
+              <p id="binding-status-text" class="title-text" style="font-size: 13px;">Not bound</p>
+            </div>
+            <div id="bind-project-section" class="hidden" style="margin-bottom: 12px;">
+              <label for="select-bind-project" class="label">Bind to local project:</label>
+              <select id="select-bind-project" class="input-text" style="margin-bottom: 8px;">
+                <option value="">[ Select a local project ▼ ]</option>
+              </select>
+              <div style="display: flex; gap: 8px;">
+                <button id="btn-bind-project" class="btn btn-primary" style="flex: 1;">Bind Project</button>
+                <button id="btn-skip-bind" class="btn btn-outline" style="flex: 1;">Skip for now</button>
+              </div>
+            </div>
+            <button id="btn-done" class="btn btn-primary">Done</button>
+          </div>
+        </section>
+      </div>
+
+      <!-- State 6: Build Coach Session View (M12.11) -->
+      <section id="view-session" class="session-view hidden">
+        <div class="session-header">
+          <div style="flex: 1;">
+            <label for="select-session-project" class="label">PROJECT</label>
+            <select id="select-session-project" class="input-text" style="width: 100%;">
+              <option value="">[ Select Project ▼ ]</option>
+            </select>
+          </div>
+          <button id="btn-refresh-session" class="btn btn-secondary btn-sm" style="margin-top: 16px;" title="Refresh Session">
+            🔄 Refresh
+          </button>
+        </div>
+
+        <div id="session-loading" class="spinner-container hidden">
+          <div class="spinner"></div>
+          <p>Connecting to Build Coach...</p>
+        </div>
+
+        <div id="session-empty" class="info-card hidden">
+          <p class="info-title">No Local Project Connected</p>
+          <p class="info-desc">Start Build Coach locally and register or select a project to observe activity.</p>
+        </div>
+
+        <div id="session-details" class="hidden">
+          <!-- State and Incident Header Card -->
+          <div class="status-card">
+            <div class="status-row">
+              <span class="label">STATE</span>
+              <span id="sess-state-badge" class="badge">STABLE</span>
+            </div>
+            <div class="status-row">
+              <span class="label">LATEST INCIDENT</span>
+              <span id="sess-latest-incident" class="val-text">None</span>
+            </div>
+            <div class="status-row">
+              <span class="label">STATUS</span>
+              <span id="sess-fix-status" class="val-text">UNKNOWN</span>
             </div>
           </div>
-          <button id="btn-done" class="btn btn-primary">Done</button>
+
+          <!-- 1. What Happened? -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <h4>WHAT HAPPENED?</h4>
+              <button id="btn-toggle-explain" class="btn-link">Details ▼</button>
+            </div>
+            <p id="sess-what-happened" class="card-desc">No active incidents detected.</p>
+            <div id="sess-explain-expanded" class="hidden expanded-box">
+              <!-- Expanded explanation statements -->
+            </div>
+          </div>
+
+          <!-- 2. How Do We Know? -->
+          <div class="section-card">
+            <h4>HOW DO WE KNOW?</h4>
+            <ul id="sess-evidence-list" class="evidence-list">
+              <li>✓ No runtime errors observed.</li>
+            </ul>
+          </div>
+
+          <!-- 3. Still Unknown -->
+          <div class="section-card">
+            <h4>STILL UNKNOWN</h4>
+            <ul id="sess-unknowns-list" class="unknowns-list">
+              <li>- No critical unknowns recorded.</li>
+            </ul>
+          </div>
+
+          <!-- 4. Next Action -->
+          <div class="section-card action-card">
+            <div class="section-card-header">
+              <h4>NEXT ACTION</h4>
+              <span id="sess-action-priority" class="badge">NORMAL</span>
+            </div>
+            <p id="sess-action-title" class="action-title">No immediate action required.</p>
+            <p id="sess-action-why" class="action-why"></p>
+          </div>
+
+          <!-- 5. Do I Understand? -->
+          <div class="section-card">
+            <div class="section-card-header">
+              <h4>DO I UNDERSTAND?</h4>
+              <span id="sess-und-badge" class="badge">PENDING</span>
+            </div>
+            <p id="sess-und-desc" class="card-desc">Understanding evaluation pending.</p>
+            <button id="btn-start-understand" class="btn btn-secondary btn-sm" style="margin-top: 8px; width: 100%;">
+              🎓 Can-I-Explain Comprehension Check
+            </button>
+          </div>
+
+          <!-- 6. Recent Activity -->
+          <div class="section-card">
+            <h4>RECENT ACTIVITY</h4>
+            <ul id="sess-activity-list" class="activity-list">
+              <!-- Events list -->
+            </ul>
+          </div>
         </div>
       </section>
 
@@ -121,6 +230,7 @@
         <span id="error-text">An error occurred.</span>
       </div>
     </main>
+
 
     <!-- Footer Security Notice -->
     <footer class="footer">

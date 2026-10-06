@@ -203,6 +203,12 @@ Before any context packet is assembled or cached for future external provider us
 - **Interactive Session Safety**: Interactive shells, REPLs, and terminal editors (`vim`, `ssh`, `python`) are excluded from stream capture to prevent buffer corruption.
 - **Zero Remote Execution Surface**: The local bridge HTTP service (`127.0.0.1:8765`) does NOT expose terminal hook execution endpoints. Terminal execution remains exclusively under local developer control.
 
+### 5.16 Real Developer Workflow & UI Invariants (Milestone 12.11)
+- **Zero Fake Completion Guard**: The UI and bridge APIs strictly prohibit arbitrary "mark completed", "mark fixed", or "mark understood" overrides. All fix statuses, test passes, and comprehension levels must be established through deterministic observations, exit codes, and verified evaluations.
+- **Epistemic Honesty & Non-Omission of Unknowns**: The UI must never hide epistemic limits or assume safety from the mere absence of error logs. Unverified states always report `UNKNOWN`.
+- **Project Boundary Enforcement**: Bridge endpoints (`POST /v1/projects/{id}/refresh`, `GET /v1/projects/{id}/understanding`) strictly validate project ID registration and prevent cross-project pollution.
+- **Local Bridge Isolation**: All endpoints bind strictly to loopback `127.0.0.1`, mandate valid browser extension origins, and expose strictly sanitized DTO summaries with zero raw credentials or system paths.
+
 ---
 
 ## 6. Milestone Security Review Protocol

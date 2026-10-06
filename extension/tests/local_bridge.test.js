@@ -18,6 +18,8 @@ import {
   analyzeEvidence,
   getGuidance,
   getSession,
+  getUnderstanding,
+  refreshSession,
 } from "../src/bridge/local_bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -515,6 +517,67 @@ describe("Local Bridge Client Protocol & Security Boundary", () => {
     assert.equal(res.result.state, "ACTION_REQUIRED");
     assert.equal(res.result.next_action.action_type, "RUN_TEST");
   });
+
+  test("getUnderstanding rejects non-local origins", async () => {
+    await assert.rejects(
+      async () => getUnderstanding("prj_1", "http://evil.com"),
+      /Security violation: Bridge client will not connect to non-local origin/
+    );
+  });
+
+  test("getUnderstanding retrieves comprehension status successfully", async () => {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/projects/prj_123/understanding");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          message_type: "understanding_result",
+          result: {
+            project_id: "prj_123",
+            status: "EVALUATED",
+            overall_state: "UNDERSTOOD",
+            gap_count: 0,
+            requires_explanation: false,
+          },
+        }),
+      };
+    };
+
+    const res = await getUnderstanding("prj_123");
+    assert.equal(res.ok, true);
+    assert.equal(res.result.status, "EVALUATED");
+    assert.equal(res.result.overall_state, "UNDERSTOOD");
+  });
+
+  test("refreshSession sends POST and retrieves updated session", async () => {
+    globalThis.fetch = async (url, opts) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/projects/prj_123/refresh");
+      assert.equal(opts.method, "POST");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          message_type: "session_result",
+          result: {
+            session_id: "session_prj_123",
+            project_id: "prj_123",
+            state: "STABLE",
+            fix_status: "VERIFIED",
+            what_happened: "All tests passing cleanly.",
+          },
+        }),
+      };
+    };
+
+    const res = await refreshSession("prj_123");
+    assert.equal(res.ok, true);
+    assert.equal(res.result.state, "STABLE");
+    assert.equal(res.result.fix_status, "VERIFIED");
+  });
 });
+
 
 

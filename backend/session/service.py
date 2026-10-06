@@ -34,6 +34,7 @@ from backend.session.summary import (
     build_understanding_summary,
     build_guidance_summary,
     build_evidence_summary,
+    build_workflow_elements,
 )
 
 
@@ -111,6 +112,26 @@ class SessionService:
         )
         guidance_summary = build_guidance_summary(plan)
 
+        # 8b. Deterministic explanation for incident (if any)
+        explanation = None
+        if packet and packet.incident:
+            try:
+                explanation = self.observation_service.explain_incident(
+                    project_id=project_id,
+                    incident_id=packet.incident.get("incident_id"),
+                    has_consent=False,
+                )
+            except Exception:
+                explanation = None
+
+        workflow = build_workflow_elements(
+            timeline=timeline,
+            packet=packet,
+            explanation=explanation,
+            verification_summary=verification_summary,
+            summary=summary,
+        )
+
         # 9. Extract incident details
         active_incident = packet.incident if (packet and packet.incident) else None
         recent_incidents = [packet.incident] if (packet and packet.incident) else []
@@ -136,7 +157,18 @@ class SessionService:
             understanding_summary=understanding_summary,
             guidance_summary=guidance_summary,
             next_action=plan.top_next_action,
+            what_happened=workflow["what_happened"],
+            fix_status=workflow["fix_status"],
+            how_do_we_know=workflow["how_do_we_know"],
+            evidence_chain=workflow["evidence_chain"],
+            recent_activity=workflow["recent_activity"],
+            incident_explanation=(
+                explanation.model_dump()
+                if explanation and hasattr(explanation, "model_dump")
+                else (explanation if isinstance(explanation, dict) else None)
+            ),
         )
+
 
         # Store in database
         self.db.upsert_session(

@@ -4,6 +4,13 @@ import sys
 import argparse
 from typing import Optional, List
 
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from backend.cli.runner import (
     get_cli_version,
     resolve_workspace,
@@ -992,7 +999,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         action = getattr(args, "session_action", None)
         target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
         if not target_proj_id:
-            target_proj_id = project.id
+            target_proj_id = project.id if project else None
 
         if not target_proj_id:
             if getattr(args, "json", False):
