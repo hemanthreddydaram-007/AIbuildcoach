@@ -400,3 +400,224 @@ def test_bridge_rejects_untrusted_browser_origin(running_bridge_server):
         assert resp.headers.get("Cache-Control") == "no-store"
 
 
+def test_bridge_get_projects_exposes_minimal_data_only(running_bridge_server):
+    """Verifies GET /v1/projects returns project_id and display_name, never filesystem paths."""
+    base_url, db, project = running_bridge_server
+
+    # Add second project to db
+    p2 = Project(id="prj_second", name="Second App", root_path="/secret/local/path/second")
+    db.upsert_project(p2)
+
+    req = urllib.request.Request(f"{base_url}/v1/projects", method="GET")
+    with urllib.request.urlopen(req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["ok"] is True
+        assert data["protocol"] == BRIDGE_PROTOCOL_V1
+        projects = data["result"]["projects"]
+        assert len(projects) >= 2
+
+        # Invariant: No filesystem paths in project DTO
+        for p in projects:
+            assert "project_id" in p
+            assert "display_name" in p
+            assert "root_path" not in p
+            assert "path" not in p
+            assert "directory" not in p
+
+
+def test_bridge_bind_conversation_success_and_status(running_bridge_server):
+    """Verifies POST /v1/conversations/{id}/bind and GET /v1/conversations/{id}/binding."""
+    base_url, db, project = running_bridge_server
+
+    # 1. Ingest an unbound conversation
+    capture_env = make_valid_envelope()
+    post_req = urllib.request.Request(
+        f"{base_url}/v1/capture",
+        data=json.dumps(capture_env).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(post_req) as resp:
+        capture_data = json.loads(resp.read().decode("utf-8"))
+        conv_id = capture_data["result"]["conversation_id"]
+
+    # 2. Check initial binding status (should be bound to default project or unbound)
+    status_req = urllib.request.Request(f"{base_url}/v1/conversations/{conv_id}/binding", method="GET")
+    with urllib.request.urlopen(status_req) as resp:
+        status_data = json.loads(resp.read().decode("utf-8"))
+        assert status_data["ok"] is True
+        assert status_data["result"]["conversation_id"] == conv_id
+
+    # 3. Create another registered project
+    target_p = Project(id="prj_target_123", name="Target Project", root_path="/local/target")
+    db.upsert_project(target_p)
+
+    # 4. Explicitly bind to target_p
+    bind_payload = {"project_id": "prj_target_123"}
+    bind_req = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/bind",
+        data=json.dumps(bind_payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(bind_req) as resp:
+        bind_data = json.loads(resp.read().decode("utf-8"))
+        assert bind_data["ok"] is True
+        assert bind_data["result"]["conversation_id"] == conv_id
+        assert bind_data["result"]["project_id"] == "prj_target_123"
+        assert bind_data["result"]["binding_source"] == "USER_SELECTED"
+
+    # 5. Check binding status now reflects target_p
+    with urllib.request.urlopen(status_req) as resp:
+        status_data = json.loads(resp.read().decode("utf-8"))
+        assert status_data["result"]["bound"] is True
+        assert status_data["result"]["project"]["project_id"] == "prj_target_123"
+        assert status_data["result"]["project"]["display_name"] == "Target Project"
+
+
+def test_bridge_rebind_conversation_replaces_old_binding(running_bridge_server):
+    """Verifies that rebinding a conversation cleanly updates the active project without duplicates."""
+    base_url, db, project = running_bridge_server
+
+    p_a = Project(id="prj_alpha", name="Project Alpha", root_path="/alpha")
+    p_b = Project(id="prj_beta", name="Project Beta", root_path="/beta")
+    db.upsert_project(p_a)
+    db.upsert_project(p_b)
+
+    # Ingest conversation
+    capture_env = make_valid_envelope()
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/capture",
+            data=json.dumps(capture_env).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        conv_id = json.loads(resp.read().decode("utf-8"))["result"]["conversation_id"]
+
+    # Bind to Project Alpha
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/conversations/{conv_id}/bind",
+            data=json.dumps({"project_id": "prj_alpha"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        assert json.loads(resp.read().decode("utf-8"))["result"]["project_id"] == "prj_alpha"
+
+    # Rebind to Project Beta
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/conversations/{conv_id}/bind",
+            data=json.dumps({"project_id": "prj_beta"}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        assert json.loads(resp.read().decode("utf-8"))["result"]["project_id"] == "prj_beta"
+
+    # Verify directly from Database: cardinality is 1
+    binding = db.get_conversation_binding(conv_id)
+    assert binding is not None
+    assert binding.project_id == "prj_beta"
+
+    # Verify no multiple active bindings in SQLite
+    conn = db.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) as cnt FROM conversation_project_bindings WHERE conversation_id = ?", (conv_id,))
+        assert cur.fetchone()["cnt"] == 1
+    finally:
+        conn.close()
+
+
+def test_bridge_rejects_arbitrary_filesystem_path_in_bind(running_bridge_server):
+    """Proves that sending a filesystem path instead of project_id is rejected."""
+    base_url, db, project = running_bridge_server
+
+    # Ingest conversation
+    capture_env = make_valid_envelope()
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/capture",
+            data=json.dumps(capture_env).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        conv_id = json.loads(resp.read().decode("utf-8"))["result"]["conversation_id"]
+
+    # Attempt to send filesystem path in path field
+    req = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/bind",
+        data=json.dumps({"path": "C:\\Users\\Desktop\\AIbuildcoach"}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(req)
+    assert exc_info.value.code == 400
+    err_body = json.loads(exc_info.value.read().decode("utf-8"))
+    assert err_body["error"]["code"] == "UNTRUSTED_PROJECT_PATH"
+
+    # Attempt to pass path traversal as project_id
+    req2 = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/bind",
+        data=json.dumps({"project_id": "../../etc/passwd"}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info2:
+        urllib.request.urlopen(req2)
+    assert exc_info2.value.code == 400
+    err_body2 = json.loads(exc_info2.value.read().decode("utf-8"))
+    assert err_body2["error"]["code"] == "UNTRUSTED_PROJECT_PATH"
+
+
+def test_bridge_bind_unknown_project_and_conversation(running_bridge_server):
+    """Verifies 404 response when binding unknown conversation or unknown project."""
+    base_url, db, project = running_bridge_server
+
+    # Ingest conversation
+    capture_env = make_valid_envelope()
+    with urllib.request.urlopen(
+        urllib.request.Request(
+            f"{base_url}/v1/capture",
+            data=json.dumps(capture_env).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+    ) as resp:
+        conv_id = json.loads(resp.read().decode("utf-8"))["result"]["conversation_id"]
+
+    # 1. Unknown project ID
+    req = urllib.request.Request(
+        f"{base_url}/v1/conversations/{conv_id}/bind",
+        data=json.dumps({"project_id": "prj_nonexistent_999"}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert exc.value.code == 404
+    err_body = json.loads(exc.value.read().decode("utf-8"))
+    assert err_body["error"]["code"] == "PROJECT_NOT_FOUND"
+
+    # 2. Unknown conversation ID
+    req2 = urllib.request.Request(
+        f"{base_url}/v1/conversations/conv_ghost_999/bind",
+        data=json.dumps({"project_id": project.id}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc2:
+        urllib.request.urlopen(req2)
+    assert exc2.value.code == 404
+    err_body2 = json.loads(exc2.value.read().decode("utf-8"))
+    assert err_body2["error"]["code"] == "CONVERSATION_NOT_FOUND"
+
+
+

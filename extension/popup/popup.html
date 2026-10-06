@@ -73,8 +73,10 @@
         </div>
 
         <div class="project-association">
-          <label for="input-project-id" class="label">Target Project ID (Optional):</label>
-          <input type="text" id="input-project-id" placeholder="e.g. prj_default" class="input-text">
+          <label for="select-project" class="label">Project (Optional):</label>
+          <select id="select-project" class="input-text">
+            <option value="">[ None / Unbound ]</option>
+          </select>
         </div>
 
         <div class="action-buttons">
@@ -96,6 +98,20 @@
           <span class="success-icon">✅</span>
           <p class="success-title">Ready in Build Coach!</p>
           <p class="success-desc" id="success-desc">Conversation was staged with zero background leakage.</p>
+          <div id="binding-status-card" class="info-card" style="margin: 10px 0; text-align: left;">
+            <p class="label">Project Binding:</p>
+            <p id="binding-status-text" class="title-text" style="font-size: 13px;">Not bound</p>
+          </div>
+          <div id="bind-project-section" class="hidden" style="margin-bottom: 12px;">
+            <label for="select-bind-project" class="label">Bind to local project:</label>
+            <select id="select-bind-project" class="input-text" style="margin-bottom: 8px;">
+              <option value="">[ Select a local project ▼ ]</option>
+            </select>
+            <div style="display: flex; gap: 8px;">
+              <button id="btn-bind-project" class="btn btn-primary" style="flex: 1;">Bind Project</button>
+              <button id="btn-skip-bind" class="btn btn-outline" style="flex: 1;">Skip for now</button>
+            </div>
+          </div>
           <button id="btn-done" class="btn btn-primary">Done</button>
         </div>
       </section>

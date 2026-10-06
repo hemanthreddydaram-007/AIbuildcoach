@@ -473,3 +473,42 @@ def test_cli_no_answer_argv_allowed(temp_project: Path):
     with pytest.raises(SystemExit) as exc:
         main(["--project-root", str(temp_project), "viva", "submit", "--session-id", "vs_123", "--answer", "leaked_text"])
     assert exc.value.code == 2  # argparse error code for unrecognized arguments
+
+
+def test_cli_project_register_list_status(tmp_path: Path):
+    """26. Tests project register, list, and status commands in human and JSON modes."""
+    proj_dir = tmp_path / "sub_project"
+    proj_dir.mkdir()
+    (proj_dir / ".git").mkdir()
+
+    # 1. Register project via JSON
+    buf = io.StringIO()
+    with patch("sys.stdout", buf):
+        rc = main(["--project-root", str(tmp_path), "project", "register", str(proj_dir), "--json"])
+    assert rc == 0
+    reg_data = json.loads(buf.getvalue())
+    assert reg_data["status"] == "success"
+    assert reg_data["data"]["registered"] is True
+    project_id = reg_data["data"]["project_id"]
+    assert len(project_id) == 16
+
+    # 2. List projects via JSON
+    buf2 = io.StringIO()
+    with patch("sys.stdout", buf2):
+        rc = main(["--project-root", str(tmp_path), "project", "list", "--json"])
+    assert rc == 0
+    list_data = json.loads(buf2.getvalue())
+    assert list_data["status"] == "success"
+    project_ids = [p["project_id"] for p in list_data["data"]["projects"]]
+    assert project_id in project_ids
+
+    # 3. Status of project via JSON
+    buf3 = io.StringIO()
+    with patch("sys.stdout", buf3):
+        rc = main(["--project-root", str(tmp_path), "project", "status", project_id, "--json"])
+    assert rc == 0
+    status_data = json.loads(buf3.getvalue())
+    assert status_data["status"] == "success"
+    assert status_data["data"]["project_id"] == project_id
+    assert status_data["data"]["bound_conversations_count"] == 0
+

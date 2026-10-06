@@ -319,6 +319,19 @@ class ConversationConsent(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class BindingSource(str):
+    USER_SELECTED = "USER_SELECTED"
+
+
+class ConversationProjectBinding(BaseModel):
+    binding_id: str
+    conversation_id: str
+    project_id: str
+    binding_source: str = BindingSource.USER_SELECTED
+    created_at: str = Field(default_factory=utc_now_iso)
+    updated_at: str = Field(default_factory=utc_now_iso)
+
+
 class ClaimStatus(str):
     UNVERIFIED = "UNVERIFIED"
     SUPPORTED = "SUPPORTED"

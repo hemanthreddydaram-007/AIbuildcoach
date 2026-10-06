@@ -616,3 +616,83 @@ def run_bridge_status(
     return check_bridge_status(host=host, port=port)
 
 
+def run_project_list(db: Database) -> Dict[str, Any]:
+    """Lists all registered projects from the database."""
+    projects = db.list_projects()
+    return {
+        "projects": [
+            {
+                "project_id": p.id,
+                "display_name": p.name,
+                "root_path": p.root_path,
+                "created_at": p.created_at,
+                "updated_at": p.updated_at,
+            }
+            for p in projects
+        ],
+        "total_projects": len(projects),
+    }
+
+
+def run_project_register(db: Database, target_path_str: str) -> Dict[str, Any]:
+    """Explicitly registers a local project root into the database."""
+    target_path = Path(target_path_str).resolve()
+    if not target_path.exists():
+        raise FileNotFoundError(f"Project directory does not exist: '{target_path}'")
+    if not target_path.is_dir():
+        raise NotADirectoryError(f"Target path is not a directory: '{target_path}'")
+
+    root = detect_project_root(target_path)
+    existing = db.get_project_by_root(str(root))
+    now_iso = utc_now_iso()
+
+    if existing:
+        # Update timestamp and name if needed
+        existing.updated_at = now_iso
+        db.upsert_project(existing)
+        return {
+            "registered": True,
+            "project_id": existing.id,
+            "display_name": existing.name,
+            "root_path": existing.root_path,
+            "status": "ALREADY_REGISTERED",
+        }
+
+    # Generate stable project ID from resolved root path
+    project_id = hashlib.sha256(str(root).encode("utf-8")).hexdigest()[:16]
+    project = Project(
+        id=project_id,
+        name=root.name,
+        root_path=str(root),
+        created_at=now_iso,
+        updated_at=now_iso,
+    )
+    db.upsert_project(project)
+
+    return {
+        "registered": True,
+        "project_id": project.id,
+        "display_name": project.name,
+        "root_path": project.root_path,
+        "status": "REGISTERED",
+    }
+
+
+def run_project_status(db: Database, project_id: str) -> Dict[str, Any]:
+    """Retrieves status and conversation count for a registered project."""
+    project = db.get_project_by_id(project_id)
+    if not project:
+        raise ValueError(f"Project '{project_id}' is not registered.")
+
+    conversations = db.list_conversations(project_id=project_id)
+    return {
+        "project_id": project.id,
+        "display_name": project.name,
+        "root_path": project.root_path,
+        "created_at": project.created_at,
+        "updated_at": project.updated_at,
+        "bound_conversations_count": len(conversations),
+    }
+
+
+

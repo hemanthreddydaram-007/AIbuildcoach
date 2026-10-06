@@ -31,6 +31,8 @@ from backend.domain.models import (
     Conversation,
     ConversationMessage,
     ConversationConsent,
+    ConversationProjectBinding,
+    BindingSource,
 )
 from backend.project_model.migrations import apply_migrations, get_current_schema_version
 
@@ -115,6 +117,26 @@ class Database:
                     updated_at=row["updated_at"],
                 )
             return None
+        finally:
+            conn.close()
+
+    def list_projects(self) -> List[Project]:
+        """Lists all registered projects ordered by updated_at DESC."""
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, name, root_path, created_at, updated_at FROM projects ORDER BY updated_at DESC")
+            rows = cursor.fetchall()
+            return [
+                Project(
+                    id=row["id"],
+                    name=row["name"],
+                    root_path=row["root_path"],
+                    created_at=row["created_at"],
+                    updated_at=row["updated_at"],
+                )
+                for row in rows
+            ]
         finally:
             conn.close()
 
@@ -1744,6 +1766,117 @@ class Database:
             )
         finally:
             conn.close()
+
+    def bind_conversation_to_project(
+        self,
+        conversation_id: str,
+        project_id: str,
+        binding_source: str = BindingSource.USER_SELECTED,
+    ) -> ConversationProjectBinding:
+        """Binds a conversation to a project atomically, replacing any prior binding (1:0..1 cardinality)."""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = self.get_connection()
+        try:
+            with conn:
+                # 1. Verify conversation exists
+                cur = conn.cursor()
+                cur.execute("SELECT conversation_id FROM conversations WHERE conversation_id = ?", (conversation_id,))
+                if not cur.fetchone():
+                    raise ValueError(f"Conversation '{conversation_id}' does not exist.")
+
+                # 2. Verify project exists
+                cur.execute("SELECT id FROM projects WHERE id = ?", (project_id,))
+                if not cur.fetchone():
+                    raise ValueError(f"Project '{project_id}' does not exist.")
+
+                # 3. Check existing binding for conversation
+                cur.execute("SELECT binding_id, created_at FROM conversation_project_bindings WHERE conversation_id = ?", (conversation_id,))
+                existing = cur.fetchone()
+
+                if existing:
+                    binding_id = existing["binding_id"]
+                    created_at = existing["created_at"]
+                    conn.execute(
+                        """
+                        UPDATE conversation_project_bindings
+                        SET project_id = ?, binding_source = ?, updated_at = ?
+                        WHERE conversation_id = ?
+                        """,
+                        (project_id, binding_source, now, conversation_id),
+                    )
+                else:
+                    binding_id = f"bnd_{uuid.uuid4().hex[:12]}"
+                    created_at = now
+                    conn.execute(
+                        """
+                        INSERT INTO conversation_project_bindings (
+                            binding_id, conversation_id, project_id, binding_source, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (binding_id, conversation_id, project_id, binding_source, created_at, now),
+                    )
+
+                # 4. Synchronize project_id on conversations table
+                conn.execute(
+                    "UPDATE conversations SET project_id = ?, updated_at = ? WHERE conversation_id = ?",
+                    (project_id, now, conversation_id),
+                )
+
+                return ConversationProjectBinding(
+                    binding_id=binding_id,
+                    conversation_id=conversation_id,
+                    project_id=project_id,
+                    binding_source=binding_source,
+                    created_at=created_at,
+                    updated_at=now,
+                )
+        finally:
+            conn.close()
+
+    def get_conversation_binding(self, conversation_id: str) -> Optional[ConversationProjectBinding]:
+        """Retrieves the active project binding for a conversation, if any."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT binding_id, conversation_id, project_id, binding_source, created_at, updated_at
+                FROM conversation_project_bindings
+                WHERE conversation_id = ?
+                """,
+                (conversation_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return ConversationProjectBinding(
+                binding_id=row["binding_id"],
+                conversation_id=row["conversation_id"],
+                project_id=row["project_id"],
+                binding_source=row["binding_source"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+        finally:
+            conn.close()
+
+    def remove_conversation_binding(self, conversation_id: str) -> bool:
+        """Removes project binding for a conversation, setting it to unbound."""
+        now = datetime.now(timezone.utc).isoformat()
+        conn = self.get_connection()
+        try:
+            with conn:
+                cur = conn.cursor()
+                cur.execute("DELETE FROM conversation_project_bindings WHERE conversation_id = ?", (conversation_id,))
+                deleted = cur.rowcount > 0
+                conn.execute(
+                    "UPDATE conversations SET project_id = NULL, updated_at = ? WHERE conversation_id = ?",
+                    (now, conversation_id),
+                )
+                return deleted
+        finally:
+            conn.close()
+
 
 
 

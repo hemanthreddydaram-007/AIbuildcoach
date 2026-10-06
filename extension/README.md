@@ -66,6 +66,29 @@ python -m backend.cli bridge start
 python -m backend.cli bridge start --port 9000
 ```
 
+## Project Management & Explicit Binding (M12.3)
+
+Build Coach manages local projects through a local-first project registry. The browser extension only ever receives and transmits stable **project IDs** (never arbitrary local filesystem paths).
+
+### Registering Local Projects:
+```bash
+# Register a local project directory
+python -m backend.cli project register /path/to/project
+
+# List registered projects
+python -m backend.cli project list
+
+# Inspect project status and bound conversations count
+python -m backend.cli project status <project_id>
+```
+
+### Binding Flow:
+1. When capturing in the extension, the popup fetches registered projects via `GET /v1/projects` (exposing only `project_id` and `display_name`).
+2. After sending the conversation, the user can explicitly select a project from the dropdown and click **Bind Project**.
+3. If preferred, the user can click **Skip for now** — the conversation remains safely stored in SQLite as unbound, and does not contaminate project context until explicitly bound.
+4. Rebinding to another project cleanly updates the binding with `1:0..1` cardinality.
+
+
 ## Running Extension Tests
 
 The extension test suite uses Node's built-in zero-dependency test runner:

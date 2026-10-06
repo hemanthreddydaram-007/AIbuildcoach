@@ -46,6 +46,31 @@ class CapturePayload(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ProjectSummaryDTO(BaseModel):
+    project_id: str
+    display_name: str
+
+
+class ProjectListResult(BaseModel):
+    projects: List[ProjectSummaryDTO] = Field(default_factory=list)
+
+
+class BindRequestPayload(BaseModel):
+    project_id: str
+
+
+class BindResult(BaseModel):
+    conversation_id: str
+    project_id: str
+    binding_source: str = "USER_SELECTED"
+
+
+class BindingStatusResult(BaseModel):
+    conversation_id: str
+    bound: bool
+    project: Optional[ProjectSummaryDTO] = None
+
+
 class BridgeRequest(BaseModel):
     protocol: str
     request_id: str
@@ -61,3 +86,4 @@ class BridgeResponse(BaseModel):
     message_type: Optional[str] = None
     result: Optional[Dict[str, Any]] = None
     error: Optional[BridgeError] = None
+

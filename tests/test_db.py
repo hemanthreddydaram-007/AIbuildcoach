@@ -209,3 +209,113 @@ def test_large_file_set_synchronization(tmp_path: Path):
     assert "src/module_999/file_999.py" in updated_paths
     assert "src/module_1500/file_1500.py" not in updated_paths
     assert "src/new_module/new_0.py" in updated_paths
+
+
+def test_conversation_project_binding_lifecycle(tmp_path: Path):
+    """Verifies project registration, conversation binding, 1:1 cardinality, rebinding, and removal."""
+    from backend.domain.models import Conversation, ConversationMessage, ConversationSource
+
+    db_file = tmp_path / "binding_test.db"
+    db = Database(db_file)
+
+    p1 = Project(id="prj_1", name="Project One", root_path=str(tmp_path / "p1"))
+    p2 = Project(id="prj_2", name="Project Two", root_path=str(tmp_path / "p2"))
+    db.upsert_project(p1)
+    db.upsert_project(p2)
+
+    # 1. Project list
+    projects = db.list_projects()
+    assert len(projects) == 2
+    assert {p.id for p in projects} == {"prj_1", "prj_2"}
+
+    # 2. Ingest conversation
+    conv = Conversation(
+        conversation_id="conv_lifecycle_1",
+        provider="CHATGPT",
+        source=ConversationSource.WEB_EXTENSION,
+        title="Binding Test",
+        messages=[ConversationMessage(message_id="m1", role="USER", content="Hello", sequence=1)],
+    )
+    db.save_conversation(conv)
+
+    # Initially unbound
+    assert db.get_conversation_binding("conv_lifecycle_1") is None
+
+    # 3. Bind to Project One
+    binding1 = db.bind_conversation_to_project("conv_lifecycle_1", "prj_1")
+    assert binding1.project_id == "prj_1"
+    assert binding1.conversation_id == "conv_lifecycle_1"
+    assert binding1.binding_source == "USER_SELECTED"
+
+    # Verify conversation table updated
+    saved_conv = db.get_conversation("conv_lifecycle_1")
+    assert saved_conv.project_id == "prj_1"
+
+    # 4. Rebind to Project Two (1:0..1 cardinality constraint)
+    binding2 = db.bind_conversation_to_project("conv_lifecycle_1", "prj_2")
+    assert binding2.project_id == "prj_2"
+    assert binding2.binding_id == binding1.binding_id  # Stable binding row updated
+
+    current_binding = db.get_conversation_binding("conv_lifecycle_1")
+    assert current_binding.project_id == "prj_2"
+
+    saved_conv = db.get_conversation("conv_lifecycle_1")
+    assert saved_conv.project_id == "prj_2"
+
+    # 5. Remove binding -> sets conversation back to unbound
+    removed = db.remove_conversation_binding("conv_lifecycle_1")
+    assert removed is True
+    assert db.get_conversation_binding("conv_lifecycle_1") is None
+
+    saved_conv = db.get_conversation("conv_lifecycle_1")
+    assert saved_conv.project_id is None
+
+
+def test_schema_migration_v10_preserves_existing_data(tmp_path: Path):
+    """Verifies that migration v10 applies cleanly to an existing v9 database preserving records."""
+    import backend.project_model.migrations as mig
+    from backend.domain.models import Conversation, ConversationMessage, ConversationSource
+
+    db_file = tmp_path / "v9_upgrade.db"
+    conn = sqlite3.connect(str(db_file))
+    conn.row_factory = sqlite3.Row
+
+    # Apply up to v9 only
+    mig.ensure_migration_table(conn)
+    for v, desc, func in mig.MIGRATIONS:
+        if v <= 9:
+            with conn:
+                func(conn)
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at, description) VALUES (?, datetime('now'), ?)",
+                    (v, desc),
+                )
+
+    # Insert a v9 project and conversation
+    with conn:
+        conn.execute(
+            "INSERT INTO projects (id, name, root_path, created_at, updated_at) VALUES ('p_old', 'Old Project', '/old', '2026-01-01', '2026-01-01')"
+        )
+        conn.execute(
+            "INSERT INTO conversations (conversation_id, provider, source, title, created_at, updated_at, metadata_json) VALUES ('c_old', 'CLAUDE', 'IMPORT', 'Old Conv', '2026-01-01', '2026-01-01', '{}')"
+        )
+    conn.close()
+
+    # Now open with Database class (which runs migrations up to v10)
+    db = Database(db_file)
+    assert db.get_schema_version() == 10
+
+    # Verify old data survived intact
+    p = db.get_project_by_id("p_old")
+    assert p is not None
+    assert p.name == "Old Project"
+
+    c = db.get_conversation("c_old")
+    assert c is not None
+    assert c.title == "Old Conv"
+
+    # Verify binding can be added to the upgraded database
+    binding = db.bind_conversation_to_project("c_old", "p_old")
+    assert binding.project_id == "p_old"
+    assert db.get_conversation_binding("c_old") is not None
+

@@ -69,12 +69,12 @@ def test_schema_migration_v8_to_v9_clean(tmp_path: Path):
     cursor.execute("SELECT MAX(version) FROM schema_migrations")
     assert cursor.fetchone()[0] == 8
 
-    # Apply migrations with v9
+    # Apply migrations with v9 and beyond
     applied = apply_migrations(conn)
-    assert applied == [9]
+    assert 9 in applied
 
-    # Verify schema version is 9
-    assert get_current_schema_version(conn) == 9
+    # Verify schema version is at least 9 (and specifically current max)
+    assert get_current_schema_version(conn) == len(MIGRATIONS)
 
     # Verify tables exist
     cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('conversations', 'conversation_messages', 'conversation_consents')")
@@ -120,10 +120,10 @@ def test_schema_migration_from_m11_0_shadow_tables(tmp_path: Path):
     )
     conn.commit()
 
-    # Now run apply_migrations to formalize v9
+    # Now run apply_migrations to formalize v9 and beyond
     applied = apply_migrations(conn)
     assert 9 in applied
-    assert get_current_schema_version(conn) == 9
+    assert get_current_schema_version(conn) == len(MIGRATIONS)
 
     # Verify existing data is preserved and not duplicated or dropped
     cursor.execute("SELECT conversation_id, title FROM conversations WHERE conversation_id = 'conv_shadow_1'")
@@ -139,15 +139,15 @@ def test_schema_migration_from_m11_0_shadow_tables(tmp_path: Path):
 
 
 def test_schema_migration_v9_idempotency(tmp_path: Path):
-    """Verifies that calling apply_migrations repeatedly on a v9 database is a safe no-op."""
+    """Verifies that calling apply_migrations repeatedly on a migrated database is a safe no-op."""
     db_file = tmp_path / "idempotent.db"
     db = Database(db_file)
-    assert db.get_schema_version() == 9
+    assert db.get_schema_version() == len(MIGRATIONS)
 
     conn = db.get_connection()
     applied = apply_migrations(conn)
     assert applied == []
-    assert get_current_schema_version(conn) == 9
+    assert get_current_schema_version(conn) == len(MIGRATIONS)
     conn.close()
 
 

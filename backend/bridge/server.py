@@ -72,10 +72,22 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         parsed = urlparse(self.path)
-        if parsed.path in {"/health", "/v1/health"}:
+        path = parsed.path
+
+        if path in {"/health", "/v1/health"}:
             status_code, response_dict = self.router.handle_health()
+        elif path in {"/v1/projects", "/projects"}:
+            status_code, response_dict = self.router.handle_list_projects()
+        elif path.startswith("/v1/conversations/") and path.endswith("/binding"):
+            # Format: /v1/conversations/{conversation_id}/binding
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "conversations" and parts[3] == "binding":
+                conv_id = parts[2]
+                status_code, response_dict = self.router.handle_get_binding(conv_id)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
-            status_code, response_dict = self.router.handle_not_found(parsed.path)
+            status_code, response_dict = self.router.handle_not_found(path)
 
         self._respond_json(status_code, response_dict)
 
@@ -93,6 +105,7 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
             return
 
         parsed = urlparse(self.path)
+        path = parsed.path
         content_length = int(self.headers.get("Content-Length", 0))
 
         if content_length > MAX_PAYLOAD_BYTES:
@@ -110,12 +123,20 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
 
         body = self.rfile.read(content_length)
 
-        if parsed.path in {"/v1/capture", "/capture"}:
+        if path in {"/v1/capture", "/capture"}:
             status_code, response_dict = self.router.handle_capture(body)
-        elif parsed.path in {"/health", "/v1/health"}:
+        elif path in {"/health", "/v1/health"}:
             status_code, response_dict = self.router.handle_health()
+        elif path.startswith("/v1/conversations/") and path.endswith("/bind"):
+            # Format: /v1/conversations/{conversation_id}/bind
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "conversations" and parts[3] == "bind":
+                conv_id = parts[2]
+                status_code, response_dict = self.router.handle_bind_conversation(conv_id, body)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
-            status_code, response_dict = self.router.handle_not_found(parsed.path)
+            status_code, response_dict = self.router.handle_not_found(path)
 
         self._respond_json(status_code, response_dict)
 

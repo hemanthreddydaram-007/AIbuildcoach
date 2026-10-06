@@ -21,6 +21,9 @@ from backend.cli.runner import (
     run_conversation_verify,
     run_bridge_start,
     run_bridge_status,
+    run_project_list,
+    run_project_register,
+    run_project_status,
 )
 from backend.cli.json_output import emit_json_response, emit_json_error, log_diagnostic
 from backend.cli.interactive import main_menu
@@ -159,6 +162,21 @@ def build_parser() -> argparse.ArgumentParser:
     bridge_status_parser = bridge_subparsers.add_parser("status", parents=[json_parent], help="Check if local bridge is running")
     bridge_status_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface (default 127.0.0.1)")
     bridge_status_parser.add_argument("--port", type=int, default=8765, help="Port to check (default 8765)")
+
+    # 7. project
+    project_parser = subparsers.add_parser("project", parents=[json_parent], help="M12.3: Project registry and binding commands")
+    project_subparsers = project_parser.add_subparsers(dest="project_action", help="Project actions: list, register, status")
+
+    # project list
+    project_subparsers.add_parser("list", parents=[json_parent], help="List registered local projects")
+
+    # project register <path>
+    register_parser = project_subparsers.add_parser("register", parents=[json_parent], help="Register a local project root")
+    register_parser.add_argument("path", type=str, help="Local directory path of the project")
+
+    # project status <project_id>
+    proj_status_parser = project_subparsers.add_parser("status", parents=[json_parent], help="Check status of a registered project")
+    proj_status_parser.add_argument("target_project_id", type=str, help="Stable project ID")
 
     return main_parser
 
@@ -575,6 +593,85 @@ def main(argv: Optional[List[str]] = None) -> int:
                 emit_json_error("bridge", "none", "INVALID_ARGUMENTS", "Action required: start or status.")
             else:
                 sys.stderr.write("Error: Subcommand required for 'bridge': start, status.\n")
+            return 1
+
+    # 7. project
+    elif args.command == "project":
+        action = getattr(args, "project_action", None)
+
+        if action == "list":
+            try:
+                res = run_project_list(db=db)
+                if getattr(args, "json", False):
+                    emit_json_response("project", "list", res)
+                else:
+                    if not res["projects"]:
+                        print("No projects registered.")
+                    else:
+                        print(f"Registered Projects ({res['total_projects']}):")
+                        for p in res["projects"]:
+                            print(f"  [{p['project_id']}] {p['display_name']} -> {p['root_path']}")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("project", "list", "PROJECT_LIST_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Project list error: {exc}\n")
+                return 2
+
+        elif action == "register":
+            target_path = getattr(args, "path", None)
+            if not target_path:
+                if getattr(args, "json", False):
+                    emit_json_error("project", "register", "INVALID_ARGUMENTS", "Path required for project register.")
+                else:
+                    sys.stderr.write("Error: Path required for 'project register'.\n")
+                return 1
+
+            try:
+                res = run_project_register(db=db, target_path_str=target_path)
+                if getattr(args, "json", False):
+                    emit_json_response("project", "register", res)
+                else:
+                    print(f"Project '{res['display_name']}' [{res['project_id']}] successfully registered ({res['status']}).")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("project", "register", "PROJECT_REGISTER_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Project register error: {exc}\n")
+                return 2
+
+        elif action == "status":
+            target_proj_id = getattr(args, "target_project_id", None)
+            if not target_proj_id:
+                if getattr(args, "json", False):
+                    emit_json_error("project", "status", "INVALID_ARGUMENTS", "project_id required for project status.")
+                else:
+                    sys.stderr.write("Error: project_id required for 'project status'.\n")
+                return 1
+
+            try:
+                res = run_project_status(db=db, project_id=target_proj_id)
+                if getattr(args, "json", False):
+                    emit_json_response("project", "status", res)
+                else:
+                    print(f"Project [{res['project_id']}]: {res['display_name']}")
+                    print(f"  Root: {res['root_path']}")
+                    print(f"  Bound conversations: {res['bound_conversations_count']}")
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("project", "status", "PROJECT_STATUS_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Project status error: {exc}\n")
+                return 2
+
+        else:
+            if getattr(args, "json", False):
+                emit_json_error("project", "none", "INVALID_ARGUMENTS", "Action required: list, register, or status.")
+            else:
+                sys.stderr.write("Error: Subcommand required for 'project': list, register, status.\n")
             return 1
 
     return 0

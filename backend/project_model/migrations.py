@@ -436,9 +436,29 @@ def migration_v9(conn: sqlite3.Connection) -> None:
     """)
 
 
+def migration_v10(conn: sqlite3.Connection) -> None:
+    """Version 10: Conversation-to-Project Binding (conversation_project_bindings)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_project_bindings (
+            binding_id TEXT PRIMARY KEY,
+            conversation_id TEXT NOT NULL UNIQUE,
+            project_id TEXT NOT NULL,
+            binding_source TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (conversation_id) REFERENCES conversations(conversation_id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bindings_conv ON conversation_project_bindings(conversation_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_bindings_proj ON conversation_project_bindings(project_id)")
+
+
 def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
     """Ensures conversation bridge tables exist with smallest compatible persistence design."""
     migration_v9(conn)
+    migration_v10(conn)
 
 
 MIGRATIONS: List[Migration] = [
@@ -451,6 +471,7 @@ MIGRATIONS: List[Migration] = [
     (7, "Comprehension runs: comprehension_runs", migration_v7),
     (8, "Viva Defence Engine: viva_sessions, viva_questions, viva_turns, viva_reports", migration_v8),
     (9, "Conversation Bridge Foundation: conversations, conversation_messages, conversation_consents", migration_v9),
+    (10, "Conversation-to-Project Binding: conversation_project_bindings", migration_v10),
 ]
 
 

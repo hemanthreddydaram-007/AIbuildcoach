@@ -151,12 +151,13 @@ Every milestone must strictly execute the following engineering cycle before pro
 - **Gate**: Complete consent verification with zero fabricated timestamps and safe provider error masking. [Status: COMPLETED]
 
 #### Milestone 12 — Browser Provider Bridge
-- **Goal**: Manifest V3 browser extension and local loopback bridge for user-directed AI conversation capture.
+- **Goal**: Manifest V3 browser extension and local loopback bridge for user-directed AI conversation capture and project binding.
 - **Scope**:
   - M12.0: Manifest V3 extension foundation (ChatGPT, Claude, Gemini).
   - M12.1: Real provider DOM adapters with zero background monitoring, `activeTab` + `scripting` permissions.
   - M12.2: Local Bridge (`buildcoach-bridge-v1` over `127.0.0.1:8765`), dynamic `optional_host_permissions`, re-redaction, and `python -m backend.cli bridge start|status`.
-- **Gate**: Full local ingestion from extension to SQLite via loopback HTTP with fallback to Copy JSON. [Status: COMPLETED]
+  - M12.3: Project Binding (`conversation_project_bindings` v10 migration), stable project IDs, project registry (`python -m backend.cli project register|list|status`), `GET /v1/projects`, `POST /v1/conversations/{id}/bind`, `GET /v1/conversations/{id}/binding`, and extension popup project picker with skip support.
+- **Gate**: Full local ingestion from extension to SQLite via loopback HTTP with explicit project selection, binding persistence, and fallback to Copy JSON. [Status: COMPLETED]
 
 ---
 

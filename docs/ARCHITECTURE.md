@@ -345,9 +345,17 @@ AI Build Coach provides a secure loopback bridge (`127.0.0.1:8765`) enabling the
 ```
 
 ### Protocol Envelope (`buildcoach-bridge-v1`)
-- **Requests**: Validated JSON envelopes specifying `protocol: "buildcoach-bridge-v1"`, `request_id`, `action: "capture"`, and structured `payload`.
+- **Requests**: Validated JSON envelopes specifying `protocol: "buildcoach-bridge-v1"`, `request_id`, `message_type: "capture" | "bind" | "health"`, and structured `payload`.
 - **Responses**: Structured envelopes returning `protocol: "buildcoach-bridge-v1"`, `request_id`, `success: boolean`, `result` or `error` details.
 - **Boundaries**: Loopback-only enforcement, zero remote listening, zero command execution, and deterministic fallback to manual JSON export.
+
+### Project Registry & Explicit Binding (Milestone 12.3)
+To guarantee that browser extensions cannot supply arbitrary filesystem paths or trigger arbitrary directory operations, project identity and binding follow strict local-first rules:
+- **Project Discovery (`GET /v1/projects`)**: Exposes only registered projects with `{project_id, display_name}`. Absolute filesystem paths are never exposed to the extension.
+- **Explicit Project Binding (`POST /v1/conversations/{id}/bind`)**: Accepts only a validated `project_id`. Rejects all filesystem paths (`path`, `root`, `filesystem_path`, `directory`, `cwd`).
+- **Binding Cardinality (1:0..1)**: A conversation has zero or one active project binding in `conversation_project_bindings`. Rebinding updates the existing binding atomically.
+- **Separation of Evidence and Existence**: An unbound conversation is stored safely but never constitutes candidate evidence for any project. Only explicit binding establishes a project relationship.
+- **Zero AI Matching**: Project binding is strictly driven by explicit user selection; zero LLM inference or heuristic path guessing.
 
 ---
 

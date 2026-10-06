@@ -12,6 +12,9 @@ import {
   requestLocalPermission,
   checkConnection,
   sendCapture,
+  listProjects,
+  bindConversation,
+  getBindingStatus,
 } from "../src/bridge/local_bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -238,5 +241,121 @@ describe("Local Bridge Client Protocol & Security Boundary", () => {
     assert.ok(!hostPermissions.includes("https://chatgpt.com/*"));
     assert.ok(!hostPermissions.includes("https://claude.ai/*"));
     assert.ok(!hostPermissions.includes("https://gemini.google.com/*"));
+  });
+
+  test("listProjects retrieves projects and preserves only project_id and display_name", async () => {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/projects");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          result: {
+            projects: [
+              { project_id: "prj_001", display_name: "Web Portal" },
+              { project_id: "prj_002", display_name: "Auth Service" },
+            ],
+          },
+        }),
+      };
+    };
+
+    const res = await listProjects();
+    assert.equal(res.ok, true);
+    assert.equal(res.projects.length, 2);
+    assert.equal(res.projects[0].project_id, "prj_001");
+    assert.equal(res.projects[0].display_name, "Web Portal");
+    assert.equal(res.projects[0].root_path, undefined);
+  });
+
+  test("listProjects handles bridge unavailable safely", async () => {
+    globalThis.fetch = async () => {
+      throw new Error("fetch failed");
+    };
+
+    const res = await listProjects();
+    assert.equal(res.ok, false);
+    assert.equal(res.error.code, "BRIDGE_UNAVAILABLE");
+  });
+
+  test("bindConversation sends strictly project_id and rejects paths", async () => {
+    let capturedUrl = null;
+    let capturedBody = null;
+
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(options.body);
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          result: {
+            conversation_id: "conv_test_123",
+            project_id: "prj_valid_99",
+            binding_source: "USER_SELECTED",
+          },
+        }),
+      };
+    };
+
+    const res = await bindConversation("conv_test_123", "prj_valid_99");
+    assert.equal(res.ok, true);
+    assert.equal(capturedUrl, "http://127.0.0.1:8765/v1/conversations/conv_test_123/bind");
+    assert.deepEqual(capturedBody, { project_id: "prj_valid_99" });
+
+    // Invariant proof: OUTBOUND payload has project_id and never path/filesystem identifiers
+    assert.ok(capturedBody.project_id);
+    assert.equal(capturedBody.path, undefined);
+    assert.equal(capturedBody.root, undefined);
+    assert.equal(capturedBody.filesystem_path, undefined);
+    assert.equal(capturedBody.directory, undefined);
+    assert.equal(capturedBody.cwd, undefined);
+  });
+
+  test("bindConversation rejects missing arguments without making network calls", async () => {
+    let called = false;
+    globalThis.fetch = async () => {
+      called = true;
+      return { ok: true };
+    };
+
+    const res1 = await bindConversation("", "prj_1");
+    assert.equal(res1.ok, false);
+    assert.equal(res1.error.code, "INVALID_CONVERSATION_ID");
+    assert.equal(called, false);
+
+    const res2 = await bindConversation("conv_1", "");
+    assert.equal(res2.ok, false);
+    assert.equal(res2.error.code, "INVALID_PROJECT_ID");
+    assert.equal(called, false);
+  });
+
+  test("getBindingStatus returns bound status and project summary", async () => {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/conversations/conv_abc/binding");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          result: {
+            conversation_id: "conv_abc",
+            bound: true,
+            project: {
+              project_id: "prj_alpha",
+              display_name: "Alpha Project",
+            },
+          },
+        }),
+      };
+    };
+
+    const res = await getBindingStatus("conv_abc");
+    assert.equal(res.ok, true);
+    assert.equal(res.result.bound, true);
+    assert.equal(res.result.project.project_id, "prj_alpha");
+    assert.equal(res.result.project.display_name, "Alpha Project");
   });
 });

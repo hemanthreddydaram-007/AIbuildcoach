@@ -146,6 +146,13 @@ Before any context packet is assembled or cached for future external provider us
 - **Permission Prompting**: The extension requests `optional_host_permissions: ["http://127.0.0.1/*"]` only when the user explicitly initiates a transfer, ensuring no persistent background access.
 - **CORS Scoping**: Preflight `OPTIONS` and response CORS headers allow extension origins and standard local headers with `Cache-Control: no-store`.
 
+### 5.8 Project Binding Security Model (Milestone 12.3)
+- **Project IDs Instead of Filesystem Paths**: The browser extension is never allowed to specify filesystem paths (`path`, `root`, `filesystem_path`, `directory`, `cwd`). Only stable, registered `project_id` strings are accepted.
+- **Zero Inferred/Automatic Project Matching**: The system never guesses or infers project bindings from conversation contents, browser URLs, git remotes, or page titles. Binding requires explicit human selection.
+- **Project Registry Ownership**: Local Build Coach owns project discovery and validation (`python -m backend.cli project register <path>`). The bridge endpoint `GET /v1/projects` returns only `{project_id, display_name}` to avoid leaking local filesystem structure.
+- **Cardinality & Conflict Prevention**: Enforces `1:0..1` active binding cardinality (`conversation_project_bindings` table with `conversation_id UNIQUE`). Rebinding is deterministic and replaces the previous project binding atomically.
+- **Standalone Unbound Usability**: An unbound conversation is stored safely but never automatically treated as project evidence, ensuring no accidental context contamination.
+
 ---
 
 ## 6. Milestone Security Review Protocol

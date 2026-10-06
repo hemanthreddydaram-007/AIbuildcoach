@@ -88,10 +88,10 @@ def validate_request_envelope(data: Dict[str, Any]) -> BridgeRequest:
         )
 
     message_type = data.get("message_type")
-    if message_type not in {"health", "capture"}:
+    if message_type not in {"health", "capture", "bind"}:
         raise BridgeValidationError(
             code="UNKNOWN_MESSAGE_TYPE",
-            message=f"Unknown message_type '{message_type}'. Supported: 'health', 'capture'.",
+            message=f"Unknown message_type '{message_type}'. Supported: 'health', 'capture', 'bind'.",
             status_code=400,
         )
 
@@ -103,6 +103,53 @@ def validate_request_envelope(data: Dict[str, Any]) -> BridgeRequest:
             message="Request envelope failed schema validation.",
             status_code=400,
         )
+
+
+def validate_project_id(project_id: Any) -> str:
+    """Validates that project_id is safe, non-empty, and free of path traversal / shell characters."""
+    if not project_id or not isinstance(project_id, str):
+        raise BridgeValidationError(
+            code="INVALID_PROJECT_ID",
+            message="project_id must be a non-empty string.",
+            status_code=400,
+        )
+    if len(project_id) > 128:
+        raise BridgeValidationError(
+            code="INVALID_PROJECT_ID",
+            message="project_id exceeds maximum length of 128 characters.",
+            status_code=400,
+        )
+    if RE_UNSAFE_IDENTIFIER.search(project_id) or ".." in project_id:
+        raise BridgeValidationError(
+            code="UNTRUSTED_PROJECT_PATH",
+            message="project_id must not contain path traversal, slashes, or shell metacharacters.",
+            status_code=400,
+        )
+    return project_id.strip()
+
+
+def validate_conversation_id(conversation_id: Any) -> str:
+    """Validates that conversation_id is safe, non-empty, and free of path traversal / shell characters."""
+    if not conversation_id or not isinstance(conversation_id, str):
+        raise BridgeValidationError(
+            code="INVALID_CONVERSATION_ID",
+            message="conversation_id must be a non-empty string.",
+            status_code=400,
+        )
+    if len(conversation_id) > 128:
+        raise BridgeValidationError(
+            code="INVALID_CONVERSATION_ID",
+            message="conversation_id exceeds maximum length of 128 characters.",
+            status_code=400,
+        )
+    if RE_UNSAFE_IDENTIFIER.search(conversation_id) or ".." in conversation_id:
+        raise BridgeValidationError(
+            code="INVALID_CONVERSATION_ID",
+            message="conversation_id must not contain path traversal, slashes, or shell metacharacters.",
+            status_code=400,
+        )
+    return conversation_id.strip()
+
 
 
 def validate_and_sanitize_capture(payload_raw: Any) -> Tuple[CapturePayload, int]:
