@@ -310,7 +310,48 @@ The "Understand What Changed" engine synthesizes physical repository changes (M3
 
 ---
 
-## 8. Evidence Object Model & Provenance
+## 8. Browser Extension & Local Bridge Transport (Milestone 12.2)
+
+AI Build Coach provides a secure loopback bridge (`127.0.0.1:8765`) enabling the Manifest V3 browser extension to ingest captured AI provider conversations directly into the local SQLite database without cloud intermediaries.
+
+```
++-------------------------------------------------------------------------+
+|                  BROWSER EXTENSION TO LOCAL ENGINE BRIDGE               |
++-------------------------------------------------------------------------+
+| Browser Extension (Manifest V3)                                         |
+| - activeTab + scripting user-triggered DOM capture                      |
+| - Client-side secret redaction (secrets.js)                             |
+| - optional_host_permissions: ["http://127.0.0.1/*"] (prompt-gated)       |
+| - Local Bridge Client (local_bridge.js)                                  |
++-------------------------------------------------------------------------+
+                                    │
+                       HTTP POST (127.0.0.1:8765)
+                       Protocol: buildcoach-bridge-v1
+                                    ▼
++-------------------------------------------------------------------------+
+| Python Local Bridge Engine (backend.bridge)                             |
+| - ThreadingHTTPServer bound strictly to 127.0.0.1 (never 0.0.0.0)        |
+| - BridgeRouter (/health, /v1/capture)                                   |
+| - BridgeValidator: Protocol check, payload size limit (5MB), no shell   |
+|   injection, path traversal prevention, server-side secret re-redaction |
++-------------------------------------------------------------------------+
+                                    │
+                                    ▼
++-------------------------------------------------------------------------+
+| Core Storage & Verification (M11.0 - M11.2)                             |
+| - ConversationIngestionService                                          |
+| - SQLite State Database (.buildcoach/state.db)                          |
++-------------------------------------------------------------------------+
+```
+
+### Protocol Envelope (`buildcoach-bridge-v1`)
+- **Requests**: Validated JSON envelopes specifying `protocol: "buildcoach-bridge-v1"`, `request_id`, `action: "capture"`, and structured `payload`.
+- **Responses**: Structured envelopes returning `protocol: "buildcoach-bridge-v1"`, `request_id`, `success: boolean`, `result` or `error` details.
+- **Boundaries**: Loopback-only enforcement, zero remote listening, zero command execution, and deterministic fallback to manual JSON export.
+
+---
+
+## 9. Evidence Object Model & Provenance
 
 Every statement presented to the user must be backed by an evidence model:
 

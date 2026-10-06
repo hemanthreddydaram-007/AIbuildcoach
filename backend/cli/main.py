@@ -19,6 +19,8 @@ from backend.cli.runner import (
     run_conversation_normalize,
     run_conversation_analyze,
     run_conversation_verify,
+    run_bridge_start,
+    run_bridge_status,
 )
 from backend.cli.json_output import emit_json_response, emit_json_error, log_diagnostic
 from backend.cli.interactive import main_menu
@@ -143,6 +145,20 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser.add_argument("--claim-id", type=str, required=True, help="Claim ID to verify")
     verify_parser.add_argument("--project-id", type=str, default=None, help="Project ID (defaults to current project)")
     verify_parser.add_argument("--consent", action="store_true", default=False, help="Explicit consent for AI Gateway processing")
+
+    # 6. bridge
+    bridge_parser = subparsers.add_parser("bridge", parents=[json_parent], help="M12.2: Local HTTP bridge for browser extension")
+    bridge_subparsers = bridge_parser.add_subparsers(dest="bridge_action", help="Bridge actions: start, status")
+
+    # bridge start
+    bridge_start_parser = bridge_subparsers.add_parser("start", parents=[json_parent], help="Start the local bridge server")
+    bridge_start_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface (must be 127.0.0.1)")
+    bridge_start_parser.add_argument("--port", type=int, default=8765, help="Port to listen on (default 8765)")
+
+    # bridge status
+    bridge_status_parser = bridge_subparsers.add_parser("status", parents=[json_parent], help="Check if local bridge is running")
+    bridge_status_parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface (default 127.0.0.1)")
+    bridge_status_parser.add_argument("--port", type=int, default=8765, help="Port to check (default 8765)")
 
     return main_parser
 
@@ -513,6 +529,53 @@ def main(argv: Optional[List[str]] = None) -> int:
                 else:
                     sys.stderr.write(f"Conversation normalize error: {exc}\n")
                 return 2
+
+    # 6. bridge
+    elif args.command == "bridge":
+        action = getattr(args, "bridge_action", None)
+        host = getattr(args, "host", "127.0.0.1")
+        port = getattr(args, "port", 8765)
+
+        if action == "start":
+            if getattr(args, "json", False):
+                emit_json_response("bridge", "start", {"running": True, "host": host, "port": port, "protocol": "buildcoach-bridge-v1"})
+            try:
+                run_bridge_start(
+                    db=db,
+                    project_id=project.id,
+                    host=host,
+                    port=port,
+                    blocking=not getattr(args, "json", False),
+                )
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("bridge", "start", "BRIDGE_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Bridge start error: {exc}\n")
+                return 2
+
+        elif action == "status":
+            try:
+                status_data = run_bridge_status(host=host, port=port)
+                if getattr(args, "json", False):
+                    emit_json_response("bridge", "status", status_data)
+                else:
+                    running_str = "RUNNING" if status_data.get("running") else "STOPPED"
+                    print(f"Bridge {status_data['host']}:{status_data['port']} is {running_str} (protocol: {status_data.get('protocol')})")
+                return 0 if status_data.get("running") else 1
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("bridge", "status", "STATUS_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Bridge status error: {exc}\n")
+                return 2
+        else:
+            if getattr(args, "json", False):
+                emit_json_error("bridge", "none", "INVALID_ARGUMENTS", "Action required: start or status.")
+            else:
+                sys.stderr.write("Error: Subcommand required for 'bridge': start, status.\n")
+            return 1
 
     return 0
 

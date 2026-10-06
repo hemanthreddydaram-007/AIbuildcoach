@@ -52,4 +52,12 @@ describe("Manifest V3 & Refined Permission Boundary Validation", () => {
     assert.ok(manifest.action);
     assert.equal(manifest.action.default_popup, "popup/popup.html");
   });
+
+  test("optional_host_permissions bounded strictly to local loopback 127.0.0.1", () => {
+    const optHosts = manifest.optional_host_permissions || [];
+    assert.deepEqual(optHosts, ["http://127.0.0.1/*"]);
+    assert.ok(!optHosts.includes("<all_urls>"));
+    assert.ok(!optHosts.includes("http://*"));
+    assert.ok(!optHosts.includes("https://*"));
+  });
 });

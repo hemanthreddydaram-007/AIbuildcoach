@@ -127,6 +127,8 @@ def test_manifest_no_host_permissions_or_static_content_scripts(extension_manife
     assert "content_scripts" not in extension_manifest or not extension_manifest["content_scripts"], (
         "M12.1 eliminates static content_scripts injection in favor of user-triggered scripting.executeScript"
     )
+    # M12.2 allows only optional_host_permissions bounded to local loopback
+    assert extension_manifest.get("optional_host_permissions") == ["http://127.0.0.1/*"]
 
 
 def test_extension_file_structure():
@@ -141,6 +143,7 @@ def test_extension_file_structure():
         EXTENSION_DIR / "src" / "messages.js",
         EXTENSION_DIR / "src" / "secrets.js",
         EXTENSION_DIR / "src" / "bridge.js",
+        EXTENSION_DIR / "src" / "bridge" / "local_bridge.js",
         EXTENSION_DIR / "src" / "adapters" / "base.js",
         EXTENSION_DIR / "src" / "adapters" / "chatgpt.js",
         EXTENSION_DIR / "src" / "adapters" / "claude.js",

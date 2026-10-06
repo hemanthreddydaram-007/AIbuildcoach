@@ -142,18 +142,32 @@ Every milestone must strictly execute the following engineering cycle before pro
   - Systematic empirical testing against validation hypotheses (H1–H6, H7a, H7b).
 - **Gate**: Both V1 workflows proven reliable across all target repo fixtures and 210/210 passing tests. [Status: COMPLETED - 210/210 tests passing]
 
+#### Milestone 11 — AI Ingestion, Grounding & Verification
+- **Goal**: Full ingestion, evidence grounding, and cryptographic consent-verification of AI provider sessions.
+- **Scope**:
+  - M11.0: Canonical `Conversation` and `ConversationMessage` schemas, secret detection, SQLite persistence.
+  - M11.1: Evidence attribution and grounding graph linking project diffs/files to conversations.
+  - M11.2: Deterministic verification packet construction, cryptographic hashing, and safe error metadata.
+- **Gate**: Complete consent verification with zero fabricated timestamps and safe provider error masking. [Status: COMPLETED]
+
+#### Milestone 12 — Browser Provider Bridge
+- **Goal**: Manifest V3 browser extension and local loopback bridge for user-directed AI conversation capture.
+- **Scope**:
+  - M12.0: Manifest V3 extension foundation (ChatGPT, Claude, Gemini).
+  - M12.1: Real provider DOM adapters with zero background monitoring, `activeTab` + `scripting` permissions.
+  - M12.2: Local Bridge (`buildcoach-bridge-v1` over `127.0.0.1:8765`), dynamic `optional_host_permissions`, re-redaction, and `python -m backend.cli bridge start|status`.
+- **Gate**: Full local ingestion from extension to SQLite via loopback HTTP with fallback to Copy JSON. [Status: COMPLETED]
+
 ---
 
 ### Phase 2: Post-V1 Enhancements (Explicitly Deferred)
 
 | Milestone | Feature Name | Prerequisite |
 | :--- | :--- | :--- |
-| **Milestone 11** | What Next? (Smallest useful next action) | Successful V1 validation |
-| **Milestone 12** | Project Brain History (Build Story, Decision Ledger) | Milestone 11 completion |
 | **Milestone 13** | Impact Before Change (Dependency blast radius analysis) | Project Graph maturity |
 | **Milestone 14** | Formal Knowledge States (`EXPOSED` → `INDEPENDENT`) | User learning dataset |
 | **Milestone 15** | Project Passport & Build Map (Visual architecture) | Validated user demand |
-| **Milestone 16** | Chrome Extension Context (Permissioned browser logs) | Core engine stability |
-| **Milestone 17** | BCAP (Build Coach Agent Protocol interoperability) | Industry agent adoption |
-| **Milestone 18** | Multi-Provider Gateway (OpenAI, Anthropic adapters) | V1 scaling phase |
-| **Milestone 19** | Advanced Learning (Spaced repetition, Bloom taxonomy) | Verified learning metrics |
+| **Milestone 16** | BCAP (Build Coach Agent Protocol interoperability) | Industry agent adoption |
+| **Milestone 17** | Multi-Provider Gateway (OpenAI, Anthropic adapters) | V1 scaling phase |
+| **Milestone 18** | Advanced Learning (Spaced repetition, Bloom taxonomy) | Verified learning metrics |
+

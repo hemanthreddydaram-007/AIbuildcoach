@@ -577,3 +577,42 @@ def run_conversation_verify(
     }
 
 
+def run_bridge_start(
+    db: Database,
+    project_id: Optional[str] = None,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    blocking: bool = True,
+) -> Dict[str, Any]:
+    """Starts the local bridge server on 127.0.0.1."""
+    from backend.bridge.server import create_bridge_server
+
+    server = create_bridge_server(
+        host=host,
+        port=port,
+        db=db,
+        default_project_id=project_id,
+    )
+    if blocking:
+        try:
+            print(f"Build Coach local bridge listening on http://{host}:{port} (Ctrl+C to stop)...")
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("\nStopping local bridge...")
+        finally:
+            server.server_close()
+        return {"running": False, "host": host, "port": port}
+    else:
+        return {"running": True, "host": host, "port": port}
+
+
+def run_bridge_status(
+    host: str = "127.0.0.1",
+    port: int = 8765,
+) -> Dict[str, Any]:
+    """Checks the status of the local bridge on host:port."""
+    from backend.bridge.server import check_bridge_status
+
+    return check_bridge_status(host=host, port=port)
+
+

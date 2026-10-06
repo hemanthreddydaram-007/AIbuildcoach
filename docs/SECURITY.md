@@ -131,6 +131,21 @@ Before any context packet is assembled or cached for future external provider us
 - **Epistemic Integrity**: Inferences are explicitly segregated from observations. Rationale is marked `EXPLICIT` only when verified explanatory text exists in comments or commit messages; otherwise, it is labeled `INFERRED` with explicit `UNKNOWN` markers.
 - **Fail-Safe Fallback**: In the event of provider timeouts or errors, the workflow degrades gracefully by presenting deterministic M3 diffs with zero invented AI text.
 
+### 5.7 Local Bridge Security Model (Milestone 12.2)
+- **Strict Loopback Binding**: The local bridge server (`backend.bridge.server`) binds exclusively to IPv4 loopback (`127.0.0.1`). Binding to all interfaces (`0.0.0.0`) is explicitly rejected.
+- **Client IP Confinement**: Every incoming TCP connection is checked; non-loopback source IPs are rejected immediately with `403 Forbidden`.
+- **Origin Access Control Boundary**: To prevent arbitrary web pages visited by the user from accessing the bridge (`http://127.0.0.1:8765`), the bridge inspects the HTTP `Origin` header:
+  - Browser requests carrying an `Origin` header must begin with `chrome-extension://` or match local loopback origins (`http://127.0.0.1`, `http://localhost`).
+  - Any request carrying an untrusted web `Origin` (e.g. `https://malicious-website.com`) is rejected immediately with `403 Forbidden` (`FORBIDDEN_ORIGIN`) across `OPTIONS`, `GET`, and `POST`.
+  - Non-browser direct requests (e.g., local CLI probes or test clients with no `Origin` header) are permitted on loopback.
+  - Wildcard `Access-Control-Allow-Origin: *` is strictly prohibited; CORS headers reflect only validated extension or loopback origins.
+- **Payload Size Limits**: Incoming HTTP request bodies are capped at 5 MB (`MAX_PAYLOAD_BYTES = 5 * 1024 * 1024`). Excess payloads are rejected with `413 Payload Too Large`.
+- **No Command or Code Execution**: The bridge server receives passive conversation JSON. It never passes content to a shell, subprocess, or code evaluation engine.
+- **Path Traversal & Injection Prevention**: Conversation IDs, provider names, and titles are validated with strict regex patterns; path traversal characters (`..`, `/`, `\`) and shell metacharacters (`;`, `&`, `|`, `` ` ``, `$`) are rejected.
+- **Server-Side Secret Re-Redaction**: Even though the browser extension redacts secrets client-side, the local bridge runs all received message content through `backend.context_engine.secrets.detect_and_redact` before persisting to SQLite.
+- **Permission Prompting**: The extension requests `optional_host_permissions: ["http://127.0.0.1/*"]` only when the user explicitly initiates a transfer, ensuring no persistent background access.
+- **CORS Scoping**: Preflight `OPTIONS` and response CORS headers allow extension origins and standard local headers with `Cache-Control: no-store`.
+
 ---
 
 ## 6. Milestone Security Review Protocol

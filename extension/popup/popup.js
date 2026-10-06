@@ -11,6 +11,12 @@
 import { defaultAdapterFactory } from "../src/adapters/factory.js";
 import { MessageType, createMessage } from "../src/messages.js";
 import { generatePreview, prepareTransferPayload } from "../src/bridge.js";
+import {
+  hasLocalPermission,
+  requestLocalPermission,
+  checkConnection,
+  sendCapture,
+} from "../src/bridge/local_bridge.js";
 
 // DOM Elements
 const providerBadge = document.getElementById("provider-badge");
@@ -166,30 +172,42 @@ function renderPreview(payload) {
 }
 
 // 4. Explicit User Confirmation: Send to Build Coach
-btnSend.addEventListener("click", () => {
+btnSend.addEventListener("click", async () => {
   if (!currentPayload) return;
 
   const projectId = inputProjectId.value.trim() || null;
+  const finalPayload = prepareTransferPayload(currentPayload, projectId);
 
-  chrome.runtime.sendMessage(
-    createMessage(MessageType.SEND_TO_BUILD_COACH, {
-      conversation: currentPayload,
-      projectId,
-    }),
-    (response) => {
-      if (chrome.runtime.lastError || !response || !response.success) {
-        showError(response?.error?.message || chrome.runtime.lastError?.message || "Transfer failed.");
-        return;
-      }
-
-      if (response.payload?.status === "BRIDGE_NOT_CONNECTED") {
-        showError(response.payload.message || "Local Build Coach bridge is not connected. Use 'Copy JSON' to transfer conversation.");
-        return;
-      }
-
-      showState(stateSuccess);
+  // 1. Check or request optional permission for http://127.0.0.1/*
+  const hasPerm = await hasLocalPermission();
+  if (!hasPerm) {
+    const granted = await requestLocalPermission();
+    if (!granted) {
+      showError("Connection permission to local Build Coach (127.0.0.1) was not granted. Use 'Copy JSON' to transfer manually.");
+      return;
     }
-  );
+  }
+
+  // 2. Health check
+  const health = await checkConnection();
+  if (!health.connected) {
+    showError("Build Coach is not running.\nStart it locally with:\npython -m backend.cli bridge start");
+    return;
+  }
+
+  // 3. Send capture payload to local bridge
+  const transferResult = await sendCapture(finalPayload);
+  if (!transferResult.ok) {
+    showError(transferResult.error?.message || "Transfer to local bridge failed.");
+    return;
+  }
+
+  // 4. Update success message and view
+  const successDesc = document.getElementById("success-desc");
+  if (successDesc && transferResult.result) {
+    successDesc.textContent = `Conversation '${transferResult.result.conversation_id}' (${transferResult.result.message_count} messages) securely stored in Build Coach.`;
+  }
+  showState(stateSuccess);
 });
 
 // 5. Copy JSON Action
