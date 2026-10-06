@@ -56,3 +56,6 @@ id_ed25519
 # OS Artifacts
 .DS_Store
 Thumbs.db
+
+# Build Coach local runtime state
+.buildcoach/
