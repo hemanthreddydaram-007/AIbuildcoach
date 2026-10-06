@@ -642,6 +642,62 @@ class BridgeRouter:
             )
             return 500, error_resp.model_dump()
 
+    def handle_get_session(
+        self,
+        project_id: str,
+    ) -> Tuple[int, Dict[str, Any]]:
+        """Handles GET /v1/projects/{project_id}/session (M12.8)."""
+        req_id = f"req_sess_{project_id[:12]}"
+        try:
+            clean_proj_id = validate_project_id(project_id)
+            if self.db is None:
+                raise BridgeValidationError(
+                    code="DATABASE_UNAVAILABLE",
+                    message="Database is not available on this bridge instance.",
+                    status_code=503,
+                )
+
+            from backend.session.service import SessionService
+            service = SessionService(self.db)
+            session = service.get_or_create_session(project_id=clean_proj_id)
+
+            response = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=True,
+                message_type="session_result",
+                result=session.to_api_dict(),
+            )
+            return 200, response.model_dump()
+
+        except BridgeValidationError as bve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code=bve.code, message=bve.message),
+            )
+            return bve.status_code, error_resp.model_dump()
+        except ValueError as ve:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(code="INVALID_ARGUMENTS", message=str(ve)),
+            )
+            return 400, error_resp.model_dump()
+        except Exception:
+            error_resp = BridgeResponse(
+                protocol=BRIDGE_PROTOCOL_V1,
+                request_id=req_id,
+                ok=False,
+                error=BridgeError(
+                    code="INTERNAL_ERROR",
+                    message="Bridge encountered an internal error retrieving session.",
+                ),
+            )
+            return 500, error_resp.model_dump()
+
     def handle_capture(self, raw_body: bytes) -> Tuple[int, Dict[str, Any]]:
 
         """Handles POST /v1/capture with strict envelope and payload validation."""

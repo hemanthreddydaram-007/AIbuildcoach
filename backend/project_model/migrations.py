@@ -476,6 +476,23 @@ def migration_v11(conn: sqlite3.Connection) -> None:
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_obs_ts ON observation_events(timestamp)")
 
 
+def migration_v12(conn: sqlite3.Connection) -> None:
+    """Version 12: Unified Build Coach Sessions (build_coach_sessions)."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS build_coach_sessions (
+            session_id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            state TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            metadata_json TEXT,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project ON build_coach_sessions(project_id)")
+
+
 def ensure_conversation_tables(conn: sqlite3.Connection) -> None:
     """Ensures conversation bridge tables exist with smallest compatible persistence design."""
     migration_v9(conn)
@@ -494,6 +511,7 @@ MIGRATIONS: List[Migration] = [
     (9, "Conversation Bridge Foundation: conversations, conversation_messages, conversation_consents", migration_v9),
     (10, "Conversation-to-Project Binding: conversation_project_bindings", migration_v10),
     (11, "Runtime Failure & Change Observation: observation_events", migration_v11),
+    (12, "Unified Build Coach Sessions: build_coach_sessions", migration_v12),
 ]
 
 

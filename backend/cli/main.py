@@ -231,6 +231,15 @@ def build_parser() -> argparse.ArgumentParser:
     guide_inc_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
     guide_inc_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
 
+    # 10. session (M12.8)
+    session_parser = subparsers.add_parser("session", parents=[json_parent], help="M12.8: Unified Build Coach Session")
+    session_subparsers = session_parser.add_subparsers(dest="session_action", help="Session actions: show")
+
+    # session show <project_id>
+    sess_show_parser = session_subparsers.add_parser("show", parents=[json_parent], help="Show unified project Build Coach session")
+    sess_show_parser.add_argument("target_project_id", nargs="?", default=None, help="Target project ID")
+    sess_show_parser.add_argument("--project-id", type=str, default=None, help="Target project ID")
+
     return main_parser
 
 
@@ -929,6 +938,41 @@ def main(argv: Optional[List[str]] = None) -> int:
                     emit_json_error("guidance", action, "GUIDANCE_ERROR", str(exc))
                 else:
                     sys.stderr.write(f"Guidance error: {exc}\n")
+                return 2
+
+    # 10. session (M12.8)
+    if command == "session":
+        action = getattr(args, "session_action", None)
+        target_proj_id = getattr(args, "target_project_id", None) or getattr(args, "project_id", None)
+        if not target_proj_id:
+            root = resolve_project_root(args)
+            if root:
+                proj = db.get_project_by_root(str(root))
+                if proj:
+                    target_proj_id = proj.id
+
+        if not target_proj_id:
+            if getattr(args, "json", False):
+                emit_json_error("session", action or "unknown", "MISSING_PROJECT_ID", "Target project ID is required.")
+            else:
+                sys.stderr.write("Error: Target project ID is required. Pass <project_id> or register project.\n")
+            return 2
+
+        if action == "show":
+            try:
+                from backend.cli.runner import run_session_show
+                res = run_session_show(db, project_id=target_proj_id)
+
+                if getattr(args, "json", False):
+                    emit_json_response("session", action, res["session"])
+                else:
+                    print(res["human_text"])
+                return 0
+            except Exception as exc:
+                if getattr(args, "json", False):
+                    emit_json_error("session", action, "SESSION_ERROR", str(exc))
+                else:
+                    sys.stderr.write(f"Session error: {exc}\n")
                 return 2
 
     return 0

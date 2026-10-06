@@ -102,6 +102,14 @@ class BridgeHTTPRequestHandler(BaseHTTPRequestHandler):
                 status_code, response_dict = self.router.handle_get_guidance(proj_id)
             else:
                 status_code, response_dict = self.router.handle_not_found(path)
+        elif path.startswith("/v1/projects/") and path.endswith("/session"):
+            # Format: /v1/projects/{project_id}/session (M12.8)
+            parts = path.strip("/").split("/")
+            if len(parts) == 4 and parts[0] == "v1" and parts[1] == "projects" and parts[3] == "session":
+                proj_id = parts[2]
+                status_code, response_dict = self.router.handle_get_session(proj_id)
+            else:
+                status_code, response_dict = self.router.handle_not_found(path)
         else:
             status_code, response_dict = self.router.handle_not_found(path)
 

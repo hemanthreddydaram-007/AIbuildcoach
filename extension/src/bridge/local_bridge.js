@@ -432,5 +432,60 @@ export async function getGuidance(projectId, origin = FIXED_BRIDGE_ORIGIN) {
   }
 }
 
+/**
+ * Retrieves the unified Build Coach session for a project from the bridge (M12.8).
+ * @param {string} projectId
+ * @param {string} [origin=FIXED_BRIDGE_ORIGIN]
+ * @returns {Promise<{ok: boolean, result?: object, error?: {code: string, message: string}}>}
+ */
+export async function getSession(projectId, origin = FIXED_BRIDGE_ORIGIN) {
+  const parsed = new URL(origin);
+  if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
+    throw new Error(`Security violation: Bridge client will not connect to non-local origin '${origin}'.`);
+  }
+
+  if (!projectId) {
+    return {
+      ok: false,
+      error: { code: "INVALID_PROJECT_ID", message: "Missing projectId." },
+    };
+  }
+
+  const endpoint = `${origin}/v1/projects/${encodeURIComponent(projectId)}/session`;
+  try {
+    const res = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: data.error || {
+          code: "HTTP_ERROR",
+          message: `Bridge returned status ${res.status}`,
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      result: data.result,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: {
+        code: "BRIDGE_UNAVAILABLE",
+        message: `Could not reach local Build Coach bridge: ${err.message}`,
+      },
+    };
+  }
+}
+
+
 
 

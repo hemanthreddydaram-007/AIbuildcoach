@@ -803,6 +803,28 @@ def run_guidance_show(
     }
 
 
+def run_session_show(
+    db: Database,
+    project_id: str,
+) -> Dict[str, Any]:
+    """Retrieves or recalculates unified Build Coach session for a project (M12.8)."""
+    from backend.session.service import SessionService
+    from backend.session.summary import format_human_session
+
+    service = SessionService(db)
+    session = service.get_or_create_session(project_id=project_id)
+    project = db.get_project_by_id(project_id)
+    proj_name = project.name if project else project_id
+
+    return {
+        "project_id": project_id,
+        "session": session.to_api_dict(),
+        "human_text": format_human_session(session, project_name=proj_name),
+    }
+
+
+
+
 
 
 

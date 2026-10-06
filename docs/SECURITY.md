@@ -180,6 +180,13 @@ Before any context packet is assembled or cached for future external provider us
 - **Observation-Driven Action Retirement**: Actions are marked COMPLETED strictly when subsequent verified observation events satisfy objective completion conditions, never based on self-reported completion claims.
 - **Strict Local Loopback Bridge Exclosure**: The guidance HTTP bridge endpoint (`GET /v1/projects/{project_id}/guidance`) exposes minimal high-level action DTOs, strictly omitting secrets, internal stack traces, and raw database schemas.
 
+### 5.13 Unified Build Coach Session Security Model (Milestone 12.8)
+- **Orchestration Boundary Integrity**: The session layer coordinates underlying authoritative systems (M7, M11.1, M11.2, M12.4, M12.5, M12.6, M12.7) without bypassing any subsystem validation, consent boundary, or secret redaction.
+- **Strict Project Isolation**: A session for Project A is completely isolated from Project B. It never aggregates, cross-contaminates, or leaks observations, incidents, evidence, or guidance from other projects.
+- **Deterministic Precedence with Zero LLM State Computation**: High-level session states (`READY`, `INVESTIGATING`, `VERIFYING`, `LEARNING`, `ACTION_REQUIRED`, `STABLE`, `UNKNOWN`) are determined through deterministic rule precedence with zero LLM generation.
+- **Absence of Evidence Invariant**: Absence of failure or lack of observations is never assumed to be healthy (`UNKNOWN` state is enforced when evidence is insufficient).
+- **Minimal Local Bridge Exposure**: `GET /v1/projects/{project_id}/session` operates exclusively over loopback `127.0.0.1:8765` with origin verification, exposing strictly minimal summary DTOs without sensitive paths, raw secrets, or unredacted traces.
+
 ---
 
 ## 6. Milestone Security Review Protocol

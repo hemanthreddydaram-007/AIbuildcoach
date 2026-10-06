@@ -125,6 +125,27 @@ Returns:
 - **`status`**: Re-evaluates automatically as new observations arrive.
 - **Human-in-the-Loop**: Build Coach only recommends actions; it never autonomously executes them.
 
+## Unified Build Coach Session (M12.8)
+
+Build Coach provides a single unified project session orchestrating runtime observations, timeline explanations, pedagogical comprehension, and next actions:
+
+```bash
+# Query unified session via CLI
+python -m backend.cli session show <project_id>
+python -m backend.cli session show <project_id> --json
+```
+
+Or query via the local bridge:
+```http
+GET /v1/projects/{project_id}/session
+```
+
+Returns:
+- **`state`**: Deterministic state (`READY`, `INVESTIGATING`, `VERIFYING`, `LEARNING`, `ACTION_REQUIRED`, `STABLE`, `UNKNOWN`).
+- **`summary`**: Metrics on recent changes, active incidents, and verified recoveries.
+- **`verification`**: Current verification status (`VERIFIED`, `RECOVERED`, `PERSISTING`, `UNKNOWN`).
+- **`understanding`**: Whether conceptual understanding is required (`EXPLAIN_BACK`).
+- **`next_action`**: The single highest-priority recommended human action.
 
 ## Running Extension Tests
 

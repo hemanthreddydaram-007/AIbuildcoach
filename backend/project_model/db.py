@@ -1969,6 +1969,81 @@ class Database:
         finally:
             conn.close()
 
+    def upsert_session(
+        self,
+        session_id: str,
+        project_id: str,
+        state: str,
+        created_at: str,
+        updated_at: str,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Upserts a BuildCoachSession record in the build_coach_sessions table."""
+        meta_json = json.dumps(metadata) if metadata else None
+        conn = self.get_connection()
+        try:
+            with conn:
+                conn.execute(
+                    """
+                    INSERT INTO build_coach_sessions (session_id, project_id, state, created_at, updated_at, metadata_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(session_id) DO UPDATE SET
+                        state = excluded.state,
+                        updated_at = excluded.updated_at,
+                        metadata_json = excluded.metadata_json
+                    """,
+                    (session_id, project_id, state, created_at, updated_at, meta_json),
+                )
+        finally:
+            conn.close()
+
+    def get_session_by_project_id(self, project_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves the latest session record for a project."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, project_id, state, created_at, updated_at, metadata_json FROM build_coach_sessions WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1",
+                (project_id,),
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            return {
+                "session_id": r["session_id"],
+                "project_id": r["project_id"],
+                "state": r["state"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
+            }
+        finally:
+            conn.close()
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a session record by its session_id."""
+        conn = self.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT session_id, project_id, state, created_at, updated_at, metadata_json FROM build_coach_sessions WHERE session_id = ?",
+                (session_id,),
+            )
+            r = cur.fetchone()
+            if not r:
+                return None
+            return {
+                "session_id": r["session_id"],
+                "project_id": r["project_id"],
+                "state": r["state"],
+                "created_at": r["created_at"],
+                "updated_at": r["updated_at"],
+                "metadata": json.loads(r["metadata_json"]) if r["metadata_json"] else {},
+            }
+        finally:
+            conn.close()
+
+
 
 
 

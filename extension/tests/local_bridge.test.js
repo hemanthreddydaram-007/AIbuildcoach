@@ -17,6 +17,7 @@ import {
   getBindingStatus,
   analyzeEvidence,
   getGuidance,
+  getSession,
 } from "../src/bridge/local_bridge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -472,5 +473,48 @@ describe("Local Bridge Client Protocol & Security Boundary", () => {
     assert.equal(res.result.project_id, "prj_123");
     assert.equal(res.result.top_next_action.action_type, "RUN_TEST");
   });
+
+  test("getSession rejects non-local origins", async () => {
+    await assert.rejects(
+      async () => getSession("prj_1", "http://evil.com"),
+      /Security violation: Bridge client will not connect to non-local origin/
+    );
+  });
+
+  test("getSession rejects empty projectId", async () => {
+    const res = await getSession("");
+    assert.equal(res.ok, false);
+    assert.equal(res.error.code, "INVALID_PROJECT_ID");
+  });
+
+  test("getSession retrieves unified session result successfully", async () => {
+    globalThis.fetch = async (url) => {
+      assert.equal(url, "http://127.0.0.1:8765/v1/projects/prj_123/session");
+      return {
+        ok: true,
+        json: async () => ({
+          protocol: BRIDGE_PROTOCOL_V1,
+          ok: true,
+          message_type: "session_result",
+          result: {
+            session_id: "session_prj_123",
+            project_id: "prj_123",
+            state: "ACTION_REQUIRED",
+            summary: { recent_changes: 3, active_incidents: 0, recovered_incidents: 1 },
+            verification: { status: "RECOVERED", targeted_test_observed: false },
+            understanding: { required: true },
+            next_action: { action_type: "RUN_TEST", priority: "HIGH" },
+          },
+        }),
+      };
+    };
+
+    const res = await getSession("prj_123");
+    assert.equal(res.ok, true);
+    assert.equal(res.result.project_id, "prj_123");
+    assert.equal(res.result.state, "ACTION_REQUIRED");
+    assert.equal(res.result.next_action.action_type, "RUN_TEST");
+  });
 });
+
 

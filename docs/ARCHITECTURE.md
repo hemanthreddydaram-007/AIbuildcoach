@@ -497,6 +497,56 @@ Milestone 12.7 provides a project-agnostic guidance engine that consumes verifie
 
 ---
 
+## 12. Unified Build Coach Session Orchestration (Milestone 12.8)
+
+Milestone 12.8 introduces the project-level Build Coach Session layer (`backend/session/`), orchestrating internal subsystems (M7, M11.1, M11.2, M12.4, M12.5, M12.6, M12.7) into a single coherent developer experience.
+
+```
+                    BUILD COACH
+                         │
+        ┌────────────────┼────────────────┐
+        ↓                ↓                ↓
+   CONVERSATION       PROJECT          RUNTIME
+        │                │                │
+        └────────────────┼────────────────┘
+                         ↓
+                      EVIDENCE (M11.1 / M12.4)
+                         ↓
+                   VERIFICATION (M12.6)
+                         ↓
+                    EXPLANATION (M12.6)
+                         ↓
+                 KNOWLEDGE GAP (M12.7)
+                         ↓
+                    NEXT ACTION (M12.7)
+                         ↓
+                      HUMAN
+                         ↓
+                 NEW OBSERVATION (M12.5)
+                         ↺
+```
+
+### 12.1 Deterministic Session States
+Sessions evaluate project state through strict deterministic precedence with **zero LLM generation**:
+1. `UNKNOWN`: Insufficient evidence (e.g. no observations recorded, or changes made with zero runtime/test observations).
+2. `INVESTIGATING`: Active runtime error, persisting incident, or unresolved crash.
+3. `VERIFYING`: Incident recovered operationally or changes made without passing automated test suite.
+4. `LEARNING`: Verification complete or clean, but developer conceptual comprehension gap detected.
+5. `ACTION_REQUIRED`: High-priority guidance action required (diff inspection, file review, dependency fix).
+6. `STABLE`: All verifications confirmed, automated tests passing, understanding verified, no open gaps.
+7. `READY`: Clean, idle state with zero pending changes or actions.
+
+### 12.2 Unified Primary Actions
+- `WHAT HAPPENED?` $\to$ Orchestrates M12.6 timeline explanation packet.
+- `WHAT SHOULD I DO?` $\to$ Orchestrates M12.7 prioritized next action recommendations.
+- `DO I UNDERSTAND?` $\to$ Orchestrates M7 conceptual comprehension evaluation.
+
+### 12.3 Performance & Caching
+- Session retrieval operates on pre-indexed SQLite records (`< 250 ms` SLA).
+- Avoids costly repository rescanning by inspecting cached changeset and timeline events.
+
+---
+
 ## 9. Evidence Object Model & Provenance
 
 Every statement presented to the user must be backed by an evidence model:

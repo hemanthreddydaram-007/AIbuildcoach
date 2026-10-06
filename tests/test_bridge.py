@@ -788,6 +788,29 @@ def test_bridge_get_guidance(running_bridge_server):
         assert "gaps" in data["result"]
 
 
+def test_bridge_get_session(running_bridge_server):
+    """Verifies GET /v1/projects/{project_id}/session returns unified BuildCoachSession (M12.8)."""
+    base_url, db, project = running_bridge_server
+
+    sess_req = urllib.request.Request(
+        f"{base_url}/v1/projects/{project.id}/session",
+        headers={"Accept": "application/json"},
+        method="GET",
+    )
+    with urllib.request.urlopen(sess_req) as resp:
+        assert resp.status == 200
+        data = json.loads(resp.read().decode("utf-8"))
+        assert data["ok"] is True
+        assert data["message_type"] == "session_result"
+        assert data["result"]["project_id"] == project.id
+        assert "session_id" in data["result"]
+        assert "state" in data["result"]
+        assert "summary" in data["result"]
+        assert "verification" in data["result"]
+        assert "understanding" in data["result"]
+
+
+
 
 
 

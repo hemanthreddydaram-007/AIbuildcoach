@@ -246,7 +246,22 @@ class ObservationCorrelator:
                         break
 
         if target_error is None and error_events:
-            target_error = error_events[-1]
+            # Check if any earlier error had post-error changes followed by recurrence of same error
+            for err in error_events:
+                err_sig = err.payload.get("error_signature")
+                post_changes = [c for c in change_events if c.timestamp >= err.timestamp]
+                if post_changes:
+                    recurs = [
+                        e for e in error_events
+                        if e.timestamp >= post_changes[-1].timestamp
+                        and e.payload.get("error_signature") == err_sig
+                        and e.event_id != err.event_id
+                    ]
+                    if recurs:
+                        target_error = err
+                        break
+            if target_error is None:
+                target_error = error_events[-1]
 
         # If no error events exist in the timeline at all
         if target_error is None:
